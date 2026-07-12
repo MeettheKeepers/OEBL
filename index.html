@@ -243,18 +243,7 @@ async function callAdmin(action, extra){
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
 const TEAMS = [['A','Team A'], ['B','Team B']];
-// 4 forward lines (12 skaters) + 4 D pairs (8 skaters) + 2 goalies = 20 skaters + 2 goalies per team
-const SLOT_DEFS = [
-  {grp:'Forward Lines', slots:[['L1_LW','LW'],['L1_C','C'],['L1_RW','RW']]},
-  {grp:null, slots:[['L2_LW','LW'],['L2_C','C'],['L2_RW','RW']]},
-  {grp:null, slots:[['L3_LW','LW'],['L3_C','C'],['L3_RW','RW']]},
-  {grp:null, slots:[['L4_LW','LW'],['L4_C','C'],['L4_RW','RW']]},
-  {grp:'Defense Pairs', slots:[['D1_LD','LD'],['D1_RD','RD']]},
-  {grp:null, slots:[['D2_LD','LD'],['D2_RD','RD']]},
-  {grp:null, slots:[['D3_LD','LD'],['D3_RD','RD']]},
-  {grp:null, slots:[['D4_LD','LD'],['D4_RD','RD']]},
-  {grp:'Goalies', slots:[['G1','G'],['G2','G']]},
-];
+// Per-game slot layout is built dynamically by buildSlotDefs() based on each game's format (see LINES section below).
 
 let authMode = 'signin'; // 'signin' | 'signup'
 let session = null;
@@ -492,19 +481,54 @@ async function toggleIce(id){
 }
 
 /* ---------- LINES ---------- */
+const GAME_FORMATS = {
+  default: { label:'Default — 10 skaters + 1 goalie per side (2 lines, 2 D-pairs)', fwd_lines:2, def_pairs:2, goalies:1 },
+  max:     { label:'Max — 15 skaters + 1 goalie per side (3 lines, 3 D-pairs)', fwd_lines:3, def_pairs:3, goalies:1 },
+};
+function buildSlotDefs(game){
+  const lines_n = game.fwd_lines || 2, pairs_n = game.def_pairs || 2, goalies_n = game.goalies || 1;
+  const defs = [];
+  for(let i=1;i<=lines_n;i++){
+    defs.push({ grp: i===1 ? 'Forward Lines' : null, slots:[[`L${i}_LW`,'LW'],[`L${i}_C`,'C'],[`L${i}_RW`,'RW']] });
+  }
+  for(let i=1;i<=pairs_n;i++){
+    defs.push({ grp: i===1 ? 'Defense Pairs' : null, slots:[[`D${i}_LD`,'LD'],[`D${i}_RD`,'RD']] });
+  }
+  const goalieSlots = [];
+  for(let i=1;i<=goalies_n;i++) goalieSlots.push([`G${i}`, goalies_n>1?`G${i}`:'G']);
+  defs.push({ grp:'Goalies', slots:goalieSlots });
+  return defs;
+}
 function renderLinesView(){ return linesScreen(false); }
 function renderSetLines(){ return linesScreen(true); }
 
+function newGameFormHTML(){
+  return `<div class="panel">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">New Game</h3>
+    <div class="grid cols-2">
+      <div class="field"><label>Label</label><input id="newGameLabel" placeholder="e.g. Tue Jul 21 — Richcraft Sensplex"></div>
+      <div class="field"><label>Format</label>
+        <select id="newGameFormat">
+          ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}">${f.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <button class="btn purple" onclick="createGame()">Create Game</button>
+  </div>`;
+}
 function linesScreen(editable){
   const title = editable ? 'Set Lines' : 'Game Lines';
-  const sub = editable ? 'Assign roster players to each slot, per team, for the selected game. Each team holds up to 20 skaters + 2 goalies.' : "Lines set by the commissioner for the selected game — two teams, 20 skaters + 2 goalies each.";
+  const sub = editable ? 'Assign roster players to each slot, per team, for the selected game.' : "Lines set by the commissioner for the selected game — two teams.";
   if(!games.length){
     return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
-    ${editable ? `<div class="panel"><div class="field"><label>New Game Label</label><input id="newGameLabel" placeholder="e.g. Tue Jul 21 — Richcraft Sensplex"></div><button class="btn purple" onclick="createGame()">Create Game</button></div>` : '<div class="empty">No games created yet.</div>'}`;
+    ${editable ? newGameFormHTML() : '<div class="empty">No games created yet.</div>'}`;
   }
+  const game = games.find(g=>g.id===activeGameId) || games[0];
   const opts = games.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${g.label}</option>`).join('');
   const teamLines = lines.filter(l=>l.team===activeTeam);
   const lineup = (slotKey)=>{ const row = teamLines.find(l=>l.slot_key===slotKey); return row ? row.player_id : null; };
+  const skaterCap = (game.fwd_lines||2)*3 + (game.def_pairs||2)*2;
+  const goalieCap = game.goalies||1;
   const skaterCount = teamLines.filter(l=>!l.slot_key.startsWith('G') && l.player_id).length;
   const goalieCount = teamLines.filter(l=>l.slot_key.startsWith('G') && l.player_id).length;
   const slotHTML = (slotKey,label)=>{
@@ -517,7 +541,7 @@ function linesScreen(editable){
     }
     return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p?`<span class="tag rank">${p.rank}</span>`:''}</div>`;
   };
-  const body = SLOT_DEFS.map(section=>`
+  const body = buildSlotDefs(game).map(section=>`
     ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
     <div class="line-row" style="grid-template-columns:repeat(${section.slots.length},1fr);">
       ${section.slots.map(([key,label])=>slotHTML(key,label)).join('')}
@@ -525,30 +549,20 @@ function linesScreen(editable){
   return `
   <h2 class="section-title">${title}</h2>
   <p class="section-sub">${sub}</p>
-  <div class="row-flex">
-    <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
-    ${editable ? `<button class="btn ghost small" onclick="promptNewGame()">+ New Game</button>` : ''}
-  </div>
+  <div class="field" style="max-width:320px;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
+  ${editable ? newGameFormHTML() : ''}
   <div class="role-toggle" style="margin-bottom:16px;">
     ${TEAMS.map(([key,label])=>`<button class="${activeTeam===key?'active':''}" onclick="activeTeam='${key}';render()">${label}</button>`).join('')}
   </div>
-  <p class="hint" style="margin:-8px 0 12px;">${skaterCount}/20 skaters · ${goalieCount}/2 goalies on ${TEAMS.find(t=>t[0]===activeTeam)[1]}</p>
+  <p class="hint" style="margin:-8px 0 12px;">${skaterCount}/${skaterCap} skaters · ${goalieCount}/${goalieCap} goalie(s) on ${TEAMS.find(t=>t[0]===activeTeam)[1]} (${skaterCap*2} skaters combined across both teams)</p>
   <div class="panel">${body}</div>`;
-}
-async function promptNewGame(){
-  const label = prompt('Label for the new game (e.g. "Tue Jul 21 — Richcraft Sensplex"):');
-  if(!label) return;
-  const { data, error } = await sb.from('games').insert({ label }).select().single();
-  if(error){ showToast('Failed: '+error.message); return; }
-  await loadGames();
-  activeGameId = data.id;
-  await loadLines(activeGameId);
-  render();
 }
 async function createGame(){
   const label = document.getElementById('newGameLabel').value.trim();
   if(!label) return;
-  const { data, error } = await sb.from('games').insert({ label }).select().single();
+  const formatKey = document.getElementById('newGameFormat').value;
+  const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
+  const { data, error } = await sb.from('games').insert({ label, fwd_lines:fmt.fwd_lines, def_pairs:fmt.def_pairs, goalies:fmt.goalies }).select().single();
   if(error){ showToast('Failed: '+error.message); return; }
   await loadGames();
   activeGameId = data.id;
