@@ -242,11 +242,17 @@ async function callAdmin(action, extra){
 
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
+const TEAMS = [['A','Team A'], ['B','Team B']];
+// 4 forward lines (12 skaters) + 4 D pairs (8 skaters) + 2 goalies = 20 skaters + 2 goalies per team
 const SLOT_DEFS = [
   {grp:'Forward Lines', slots:[['L1_LW','LW'],['L1_C','C'],['L1_RW','RW']]},
   {grp:null, slots:[['L2_LW','LW'],['L2_C','C'],['L2_RW','RW']]},
+  {grp:null, slots:[['L3_LW','LW'],['L3_C','C'],['L3_RW','RW']]},
+  {grp:null, slots:[['L4_LW','LW'],['L4_C','C'],['L4_RW','RW']]},
   {grp:'Defense Pairs', slots:[['D1_LD','LD'],['D1_RD','RD']]},
   {grp:null, slots:[['D2_LD','LD'],['D2_RD','RD']]},
+  {grp:null, slots:[['D3_LD','LD'],['D3_RD','RD']]},
+  {grp:null, slots:[['D4_LD','LD'],['D4_RD','RD']]},
   {grp:'Goalies', slots:[['G1','G'],['G2','G']]},
 ];
 
@@ -262,7 +268,8 @@ let iceTimes = [];      // ice_times rows
 let signups = [];       // ice_time_signups rows
 let games = [];         // games rows
 let activeGameId = null;
-let lines = [];         // game_lines rows for activeGameId
+let activeTeam = 'A';
+let lines = [];         // game_lines rows for activeGameId (both teams)
 let merch = [];
 
 /* ================= HELPERS ================= */
@@ -490,18 +497,21 @@ function renderSetLines(){ return linesScreen(true); }
 
 function linesScreen(editable){
   const title = editable ? 'Set Lines' : 'Game Lines';
-  const sub = editable ? 'Assign roster players to each slot for the selected game.' : "Lines set by the commissioner for the selected game.";
+  const sub = editable ? 'Assign roster players to each slot, per team, for the selected game. Each team holds up to 20 skaters + 2 goalies.' : "Lines set by the commissioner for the selected game — two teams, 20 skaters + 2 goalies each.";
   if(!games.length){
     return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
     ${editable ? `<div class="panel"><div class="field"><label>New Game Label</label><input id="newGameLabel" placeholder="e.g. Tue Jul 21 — Richcraft Sensplex"></div><button class="btn purple" onclick="createGame()">Create Game</button></div>` : '<div class="empty">No games created yet.</div>'}`;
   }
   const opts = games.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${g.label}</option>`).join('');
-  const lineup = (slotKey)=>{ const row = lines.find(l=>l.slot_key===slotKey); return row ? row.player_id : null; };
+  const teamLines = lines.filter(l=>l.team===activeTeam);
+  const lineup = (slotKey)=>{ const row = teamLines.find(l=>l.slot_key===slotKey); return row ? row.player_id : null; };
+  const skaterCount = teamLines.filter(l=>!l.slot_key.startsWith('G') && l.player_id).length;
+  const goalieCount = teamLines.filter(l=>l.slot_key.startsWith('G') && l.player_id).length;
   const slotHTML = (slotKey,label)=>{
     const pid = lineup(slotKey);
     const p = pid ? playerById(pid) : null;
     if(editable){
-      const options = roster.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}</option>`).join('');
+      const options = roster.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
       return `<div class="slot"><div class="pos-lbl">${label}</div>
         <select onchange="setLineSlot('${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
     }
@@ -519,6 +529,10 @@ function linesScreen(editable){
     <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
     ${editable ? `<button class="btn ghost small" onclick="promptNewGame()">+ New Game</button>` : ''}
   </div>
+  <div class="role-toggle" style="margin-bottom:16px;">
+    ${TEAMS.map(([key,label])=>`<button class="${activeTeam===key?'active':''}" onclick="activeTeam='${key}';render()">${label}</button>`).join('')}
+  </div>
+  <p class="hint" style="margin:-8px 0 12px;">${skaterCount}/20 skaters · ${goalieCount}/2 goalies on ${TEAMS.find(t=>t[0]===activeTeam)[1]}</p>
   <div class="panel">${body}</div>`;
 }
 async function promptNewGame(){
@@ -543,10 +557,10 @@ async function createGame(){
 }
 async function setLineSlot(slotKey, val){
   if(val){
-    const { error } = await sb.from('game_lines').upsert({ game_id:activeGameId, slot_key:slotKey, player_id:val }, { onConflict:'game_id,slot_key' });
+    const { error } = await sb.from('game_lines').upsert({ game_id:activeGameId, team:activeTeam, slot_key:slotKey, player_id:val }, { onConflict:'game_id,team,slot_key' });
     if(error){ showToast('Failed: '+error.message); return; }
   } else {
-    await sb.from('game_lines').delete().eq('game_id', activeGameId).eq('slot_key', slotKey);
+    await sb.from('game_lines').delete().eq('game_id', activeGameId).eq('team', activeTeam).eq('slot_key', slotKey);
   }
   await loadLines(activeGameId);
   showToast('Lines updated ✓');
@@ -618,21 +632,37 @@ async function postIce(){
 function renderRoster(){
   return `
   <h2 class="section-title">Roster</h2>
-  <p class="section-sub">${roster.length} registered players. Sign-in is name + password (no email) — names must be unique.</p>
+  <p class="section-sub">${roster.length} players. Sign-in is First Last name + password (no email) — names must be unique.</p>
+  <div class="panel grid cols-2" style="margin-bottom:16px;">
+    <div>
+      <div class="field"><label>Add Player (First Last)</label><input id="newPlayerName" placeholder="e.g. Sam Whitfield"></div>
+      <button class="btn purple" onclick="addPlayer()">Add Player</button>
+      <div class="hint">Adds a pending spot. The player then goes to "Create account" on the sign-in screen and enters this exact name plus a password of their choice to activate it and fill out their own profile.</div>
+    </div>
+  </div>
   <div class="panel">
   <table>
     <tr><th>Name</th><th>Rank</th><th>Positions</th><th>Actions</th></tr>
     ${roster.map(p=>`<tr>
-      <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}</td>
+      <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}</td>
       <td><span class="tag rank">${p.rank}</span></td>
       <td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td>
       <td>
         <button class="btn ghost small" onclick="promoteToggle('${p.id}', ${!p.is_commissioner})">${p.is_commissioner?'Remove Commissioner':'Make Commissioner'}</button>
-        <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">Reset Password</button>
+        <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">${p.claimed?'Reset Password':'Set Password'}</button>
       </td>
     </tr>`).join('')}
   </table>
   </div>`;
+}
+async function addPlayer(){
+  const name = document.getElementById('newPlayerName').value.trim();
+  if(!name){ showToast('Enter a name first'); return; }
+  const result = await callAdmin('add-player', { name });
+  if(result.error){ showToast('Failed: '+result.error); return; }
+  showToast('Player added — pending until they set a password ✓');
+  await loadRoster();
+  render();
 }
 async function promoteToggle(id, makeCommish){
   const { error } = await sb.from('profiles').update({ is_commissioner: makeCommish }).eq('id', id);
