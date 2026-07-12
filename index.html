@@ -288,10 +288,9 @@ let activeLeague = 'OEBL'; // shared account, but ice times/games/merch are scop
 let cart = [];
 
 let roster = [];        // all profiles (for admin roster/lines)
-let iceTimes = [];      // ice_times rows
+let iceTimes = [];      // ice_times rows — each one IS a "game" (lines are set per ice time)
 let signups = [];       // ice_time_signups rows
-let games = [];         // games rows
-let activeGameId = null;
+let activeGameId = null; // id of the ice_time currently selected for lines
 let activeTeam = 'A';
 let lines = [];         // game_lines rows for activeGameId (both teams)
 let merch = [];
@@ -374,7 +373,7 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadGames()]);
+  await Promise.all([loadIceTimes(), loadMerch()]);
 }
 
 async function signOut(){
@@ -431,16 +430,14 @@ async function loadIceTimes(){
   ]);
   iceTimes = its || [];
   signups = sus || [];
+  if(activeGameId && !iceTimes.find(g=>g.id===activeGameId)) activeGameId = null;
+  if(iceTimes.length && !activeGameId) activeGameId = iceTimes[0].id;
+  if(activeGameId) await loadLines(activeGameId);
+  else lines = [];
 }
 async function loadMerch(){
   const { data } = await sb.from('merch_items').select('*').eq('active', true).eq('league_id', activeLeague).order('name');
   merch = data || [];
-}
-async function loadGames(){
-  const { data } = await sb.from('games').select('*').eq('league_id', activeLeague).order('created_at');
-  games = data || [];
-  if(games.length && !activeGameId) activeGameId = games[0].id;
-  if(activeGameId) await loadLines(activeGameId);
 }
 async function loadLines(gameId){
   const { data } = await sb.from('game_lines').select('*').eq('game_id', gameId);
@@ -559,31 +556,18 @@ function buildSlotDefs(game){
 }
 function renderLinesView(){ return linesScreen(false); }
 function renderSetLines(){ return linesScreen(true); }
+function iceTimeLabel(it){ return `${it.date_label} — ${it.location}`; }
 
-function newGameFormHTML(){
-  return `<div class="panel">
-    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">New Game</h3>
-    <div class="grid cols-2">
-      <div class="field"><label>Label</label><input id="newGameLabel" placeholder="e.g. Tue Jul 21 — Richcraft Sensplex"></div>
-      <div class="field"><label>Format</label>
-        <select id="newGameFormat">
-          ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}">${f.label}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <button class="btn purple" onclick="createGame()">Create Game</button>
-  </div>`;
-}
 function linesScreen(editable){
   const title = (editable ? 'Set Lines' : 'Game Lines') + ' — ' + activeLeague;
-  const sub = editable ? `Assign roster players to each slot, for both teams, for the selected ${activeLeague} game.` : `Lines set by the commissioner for the selected ${activeLeague} game — both teams.`;
-  if(!games.length){
+  const sub = editable ? `Assign roster players to each slot, for both teams, for the selected ${activeLeague} ice time.` : `Lines set by the commissioner for the selected ${activeLeague} ice time — both teams.`;
+  if(!iceTimes.length){
     return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
-    ${editable ? newGameFormHTML() : '<div class="empty">No games created yet.</div>'}`;
+    <div class="empty">No ice times posted yet.${editable ? ' Post one from the "Post Ice Time" tab — it shows up here automatically.' : ''}</div>`;
   }
-  const game = games.find(g=>g.id===activeGameId) || games[0];
-  const opts = games.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${g.label}</option>`).join('');
-  const gameLabelEsc = (game.label||'').replace(/'/g,"\\'");
+  const game = iceTimes.find(g=>g.id===activeGameId) || iceTimes[0];
+  const opts = iceTimes.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${iceTimeLabel(g)}</option>`).join('');
+  const gameLabelEsc = iceTimeLabel(game).replace(/'/g,"\\'");
   const skaterCap = (game.fwd_lines||2)*3 + (game.def_pairs||2)*2;
   const goalieCap = game.goalies||1;
   const defs = buildSlotDefs(game);
@@ -623,36 +607,12 @@ function linesScreen(editable){
   <p class="section-sub">${sub}</p>
   <div class="row-flex" style="max-width:480px;align-items:flex-end;gap:10px;">
     <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
-    ${editable ? `<button class="btn ghost small" onclick="deleteGame('${game.id}','${gameLabelEsc}')">Delete Game</button>` : ''}
+    ${editable ? `<button class="btn ghost small" onclick="deleteIceTime('${game.id}','${gameLabelEsc}')">Delete</button>` : ''}
   </div>
-  ${editable ? newGameFormHTML() : ''}
   <div class="grid cols-2" style="align-items:start;">
     ${teamColumn('A', game.team_a_name || 'Team Light', 'team_a_name')}
     ${teamColumn('B', game.team_b_name || 'Team Dark', 'team_b_name')}
   </div>`;
-}
-async function createGame(){
-  const label = document.getElementById('newGameLabel').value.trim();
-  if(!label){ showToast('Enter a game label first'); return; }
-  const createdInLeague = activeLeague;
-  const formatKey = document.getElementById('newGameFormat').value;
-  const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
-  const { data, error } = await sb.from('games').insert({ label, league_id:createdInLeague, fwd_lines:fmt.fwd_lines, def_pairs:fmt.def_pairs, goalies:fmt.goalies }).select().single();
-  if(error){ showToast('Failed: '+error.message); return; }
-  showToast(`Game "${label}" created in ${createdInLeague} ✓`);
-  await loadGames();
-  activeGameId = data.id;
-  await loadLines(activeGameId);
-  render();
-}
-async function deleteGame(id, label){
-  if(!confirm(`Delete game "${label}"? This also removes all its line assignments. This cannot be undone.`)) return;
-  const { error } = await sb.from('games').delete().eq('id', id);
-  if(error){ showToast('Failed: '+error.message); return; }
-  if(activeGameId === id) activeGameId = null;
-  await loadGames();
-  render();
-  showToast('Game deleted ✓');
 }
 async function setLineSlot(team, slotKey, val){
   if(val){
@@ -667,9 +627,9 @@ async function setLineSlot(team, slotKey, val){
 async function renameTeam(field, current){
   const name = prompt('Team name:', current);
   if(!name || !name.trim() || name.trim()===current) return;
-  const { error } = await sb.from('games').update({ [field]: name.trim() }).eq('id', activeGameId);
+  const { error } = await sb.from('ice_times').update({ [field]: name.trim() }).eq('id', activeGameId);
   if(error){ showToast('Failed: '+error.message); return; }
-  await loadGames();
+  await loadIceTimes();
   render();
   showToast('Team renamed ✓');
 }
@@ -716,7 +676,13 @@ function renderPostIce(){
       <div class="field"><label>Date</label><input id="newDate" placeholder="e.g. Tue Jul 21"></div>
       <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM"></div>
       <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="18"></div>
+      <div class="field"><label>Roster Format (for lines)</label>
+        <select id="newFormat">
+          ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}">${f.label}</option>`).join('')}
+        </select>
+      </div>
       <button class="btn purple" onclick="postIce()">Post Ice Time</button>
+      <div class="hint">This ice time will automatically be available in Set Lines — no separate step needed.</div>
     </div>
     <div>
       <h3 style="font-size:14px;color:var(--muted);margin-top:0;">Currently Posted</h3>
@@ -732,16 +698,22 @@ async function postIce(){
   const time_label = document.getElementById('newTime').value || 'TBD';
   const location = document.getElementById('newLoc').value;
   const max_spots = Number(document.getElementById('newMax').value)||18;
-  const { error } = await sb.from('ice_times').insert({ date_label, time_label, location, max_spots, league_id:activeLeague });
+  const formatKey = document.getElementById('newFormat').value;
+  const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
+  const { error } = await sb.from('ice_times').insert({
+    date_label, time_label, location, max_spots, league_id:activeLeague,
+    fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies,
+  });
   if(error){ showToast('Failed: '+error.message); return; }
-  showToast('Ice time posted ✓');
+  showToast('Ice time posted ✓ — ready in Set Lines');
   await loadIceTimes();
   render();
 }
 async function deleteIceTime(id, label){
-  if(!confirm(`Delete ice time "${label}"? This also removes all player sign-ups for it.`)) return;
+  if(!confirm(`Delete ice time "${label}"? This also removes all player sign-ups and any lines set for it.`)) return;
   const { error } = await sb.from('ice_times').delete().eq('id', id);
   if(error){ showToast('Failed: '+error.message); return; }
+  if(activeGameId === id) activeGameId = null;
   showToast('Ice time deleted ✓');
   await loadIceTimes();
   render();
