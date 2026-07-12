@@ -583,6 +583,7 @@ function linesScreen(editable){
   }
   const game = games.find(g=>g.id===activeGameId) || games[0];
   const opts = games.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${g.label}</option>`).join('');
+  const gameLabelEsc = (game.label||'').replace(/'/g,"\\'");
   const skaterCap = (game.fwd_lines||2)*3 + (game.def_pairs||2)*2;
   const goalieCap = game.goalies||1;
   const defs = buildSlotDefs(game);
@@ -620,7 +621,10 @@ function linesScreen(editable){
   return `
   <h2 class="section-title">${title}</h2>
   <p class="section-sub">${sub}</p>
-  <div class="field" style="max-width:320px;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
+  <div class="row-flex" style="max-width:480px;align-items:flex-end;gap:10px;">
+    <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
+    ${editable ? `<button class="btn ghost small" onclick="deleteGame('${game.id}','${gameLabelEsc}')">Delete Game</button>` : ''}
+  </div>
   ${editable ? newGameFormHTML() : ''}
   <div class="grid cols-2" style="align-items:start;">
     ${teamColumn('A', game.team_a_name || 'Team Light', 'team_a_name')}
@@ -629,15 +633,26 @@ function linesScreen(editable){
 }
 async function createGame(){
   const label = document.getElementById('newGameLabel').value.trim();
-  if(!label) return;
+  if(!label){ showToast('Enter a game label first'); return; }
+  const createdInLeague = activeLeague;
   const formatKey = document.getElementById('newGameFormat').value;
   const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
-  const { data, error } = await sb.from('games').insert({ label, league_id:activeLeague, fwd_lines:fmt.fwd_lines, def_pairs:fmt.def_pairs, goalies:fmt.goalies }).select().single();
+  const { data, error } = await sb.from('games').insert({ label, league_id:createdInLeague, fwd_lines:fmt.fwd_lines, def_pairs:fmt.def_pairs, goalies:fmt.goalies }).select().single();
   if(error){ showToast('Failed: '+error.message); return; }
+  showToast(`Game "${label}" created in ${createdInLeague} ✓`);
   await loadGames();
   activeGameId = data.id;
   await loadLines(activeGameId);
   render();
+}
+async function deleteGame(id, label){
+  if(!confirm(`Delete game "${label}"? This also removes all its line assignments. This cannot be undone.`)) return;
+  const { error } = await sb.from('games').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  if(activeGameId === id) activeGameId = null;
+  await loadGames();
+  render();
+  showToast('Game deleted ✓');
 }
 async function setLineSlot(team, slotKey, val){
   if(val){
