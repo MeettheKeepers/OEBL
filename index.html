@@ -190,15 +190,14 @@
     <div class="brand-code">— (OEBL) —</div>
 
     <div id="signinForm">
-      <div class="field" id="nameField" style="display:none;"><label>Name</label><input id="loginName" type="text" placeholder="Jordan Byrne"></div>
-      <div class="field"><label>Email</label><input id="loginEmail" type="email" placeholder="you@example.com"></div>
+      <div class="field"><label>Name</label><input id="loginName" type="text" placeholder="Jordan Byrne"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" placeholder="••••••••"></div>
       <button class="btn" id="authBtn" onclick="doSignIn()">Sign In</button>
       <div id="authMsg" class="hint" style="text-align:center;min-height:16px;"></div>
     </div>
 
     <div class="signin-footer" id="authToggleRow">New player? <a onclick="toggleAuthMode()">Create account</a></div>
-    <div class="demo-note">Real accounts — sign-in, profile, ice-time bookings, and merch are backed by Supabase. Square checkout is still a placeholder.</div>
+    <div class="demo-note">Sign in with just your name and password. Real accounts — profile, ice-time bookings, and merch are backed by Supabase. Square checkout is still a placeholder.</div>
   </div>
 </div>
 
@@ -229,7 +228,17 @@
 /* ================= SUPABASE ================= */
 const SUPABASE_URL = 'https://rseogecrycwmiayvazzn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_g_Ax6fnYl8Mq6SDdFwzLew_0qE-18Uc';
+const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function slugName(name){ return (name||'').toLowerCase().trim().replace(/[^a-z0-9]/g,''); }
+function nameToEmail(name){ return slugName(name) + '@oebl.local'; }
+async function callAdmin(action, extra){
+  const headers = { 'Content-Type':'application/json', 'apikey': SUPABASE_KEY };
+  if(session) headers['Authorization'] = 'Bearer ' + session.access_token;
+  const res = await fetch(FUNCTIONS_URL + '/oebl-admin', { method:'POST', headers, body: JSON.stringify({ action, ...extra }) });
+  return res.json();
+}
 
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
@@ -271,7 +280,6 @@ function setMsg(msg, isErr){
 /* ================= AUTH ================= */
 function toggleAuthMode(){
   authMode = authMode==='signin' ? 'signup' : 'signin';
-  document.getElementById('nameField').style.display = authMode==='signup' ? 'block' : 'none';
   document.getElementById('authBtn').textContent = authMode==='signup' ? 'Create Account' : 'Sign In';
   document.getElementById('authBtn').setAttribute('onclick', authMode==='signup' ? 'doSignUp()' : 'doSignIn()');
   document.getElementById('authToggleRow').innerHTML = authMode==='signup'
@@ -282,23 +290,23 @@ function toggleAuthMode(){
 
 async function doSignUp(){
   const name = document.getElementById('loginName').value.trim();
-  const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPass').value;
-  if(!name || !email || !password){ setMsg('Fill in name, email, and password.', true); return; }
+  if(!name || !password){ setMsg('Enter a name and password.', true); return; }
   setMsg('Creating account…');
-  const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ name } } });
+  const result = await callAdmin('signup', { name, password });
+  if(result.error){ setMsg(result.error, true); return; }
+  const { data, error } = await sb.auth.signInWithPassword({ email: nameToEmail(name), password });
   if(error){ setMsg(error.message, true); return; }
-  if(data.session){ await enterApp(data.session); }
-  else { setMsg('Account created — check your email to confirm, then sign in.'); }
+  await enterApp(data.session);
 }
 
 async function doSignIn(){
-  const email = document.getElementById('loginEmail').value.trim();
+  const name = document.getElementById('loginName').value.trim();
   const password = document.getElementById('loginPass').value;
-  if(!email || !password){ setMsg('Enter your email and password.', true); return; }
+  if(!name || !password){ setMsg('Enter your name and password.', true); return; }
   setMsg('Signing in…');
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  if(error){ setMsg(error.message, true); return; }
+  const { data, error } = await sb.auth.signInWithPassword({ email: nameToEmail(name), password });
+  if(error){ setMsg('Name or password is incorrect.', true); return; }
   await enterApp(data.session);
 }
 
@@ -610,13 +618,35 @@ async function postIce(){
 function renderRoster(){
   return `
   <h2 class="section-title">Roster</h2>
-  <p class="section-sub">${roster.length} registered players.</p>
+  <p class="section-sub">${roster.length} registered players. Sign-in is name + password (no email) — names must be unique.</p>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Rank</th><th>Positions</th></tr>
-    ${roster.map(p=>`<tr><td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}</td><td><span class="tag rank">${p.rank}</span></td><td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td></tr>`).join('')}
+    <tr><th>Name</th><th>Rank</th><th>Positions</th><th>Actions</th></tr>
+    ${roster.map(p=>`<tr>
+      <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}</td>
+      <td><span class="tag rank">${p.rank}</span></td>
+      <td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td>
+      <td>
+        <button class="btn ghost small" onclick="promoteToggle('${p.id}', ${!p.is_commissioner})">${p.is_commissioner?'Remove Commissioner':'Make Commissioner'}</button>
+        <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">Reset Password</button>
+      </td>
+    </tr>`).join('')}
   </table>
   </div>`;
+}
+async function promoteToggle(id, makeCommish){
+  const { error } = await sb.from('profiles').update({ is_commissioner: makeCommish }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast(makeCommish ? 'Promoted to commissioner ✓' : 'Commissioner removed');
+  await loadRoster();
+  render();
+}
+async function resetPassword(id, name){
+  const pw = prompt(`New password for ${name}:`);
+  if(!pw) return;
+  const result = await callAdmin('reset-password', { target_user_id:id, new_password:pw });
+  if(result.error){ showToast('Failed: '+result.error); return; }
+  showToast('Password updated ✓');
 }
 
 /* ================= INIT: resume existing session ================= */
