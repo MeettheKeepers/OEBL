@@ -261,7 +261,7 @@ async function callAdmin(action, extra){
 
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
-const TEAMS = [['A','Team A'], ['B','Team B']];
+const TEAMS = [['A','Team Light'], ['B','Team Dark']];
 const LEAGUES = [
   ['OEBL','Ottawa East Beer League'],
   ['OWBL','Ottawa West Beer League'],
@@ -567,44 +567,56 @@ function newGameFormHTML(){
 }
 function linesScreen(editable){
   const title = (editable ? 'Set Lines' : 'Game Lines') + ' — ' + activeLeague;
-  const sub = editable ? `Assign roster players to each slot, per team, for the selected ${activeLeague} game.` : `Lines set by the commissioner for the selected ${activeLeague} game — two teams.`;
+  const sub = editable ? `Assign roster players to each slot, for both teams, for the selected ${activeLeague} game.` : `Lines set by the commissioner for the selected ${activeLeague} game — both teams.`;
   if(!games.length){
     return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
     ${editable ? newGameFormHTML() : '<div class="empty">No games created yet.</div>'}`;
   }
   const game = games.find(g=>g.id===activeGameId) || games[0];
   const opts = games.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${g.label}</option>`).join('');
-  const teamLines = lines.filter(l=>l.team===activeTeam);
-  const lineup = (slotKey)=>{ const row = teamLines.find(l=>l.slot_key===slotKey); return row ? row.player_id : null; };
   const skaterCap = (game.fwd_lines||2)*3 + (game.def_pairs||2)*2;
   const goalieCap = game.goalies||1;
-  const skaterCount = teamLines.filter(l=>!l.slot_key.startsWith('G') && l.player_id).length;
-  const goalieCount = teamLines.filter(l=>l.slot_key.startsWith('G') && l.player_id).length;
-  const slotHTML = (slotKey,label)=>{
-    const pid = lineup(slotKey);
-    const p = pid ? playerById(pid) : null;
-    if(editable){
-      const options = roster.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
-      return `<div class="slot"><div class="pos-lbl">${label}</div>
-        <select onchange="setLineSlot('${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
-    }
-    return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p?`<span class="tag rank">${p.rank}</span>`:''}</div>`;
+  const defs = buildSlotDefs(game);
+
+  const teamColumn = (teamKey, teamLabel, teamNameField)=>{
+    const teamLines = lines.filter(l=>l.team===teamKey);
+    const lineup = (slotKey)=>{ const row = teamLines.find(l=>l.slot_key===slotKey); return row ? row.player_id : null; };
+    const skaterCount = teamLines.filter(l=>!l.slot_key.startsWith('G') && l.player_id).length;
+    const goalieCount = teamLines.filter(l=>l.slot_key.startsWith('G') && l.player_id).length;
+    const slotHTML = (slotKey,label)=>{
+      const pid = lineup(slotKey);
+      const p = pid ? playerById(pid) : null;
+      if(editable){
+        const options = roster.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
+        return `<div class="slot"><div class="pos-lbl">${label}</div>
+          <select onchange="setLineSlot('${teamKey}','${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
+      }
+      return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p?`<span class="tag rank">${p.rank}</span>`:''}</div>`;
+    };
+    const body = defs.map(section=>`
+      ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
+      <div class="line-row" style="grid-template-columns:repeat(${section.slots.length},1fr);">
+        ${section.slots.map(([key,label])=>slotHTML(key,label)).join('')}
+      </div>`).join('');
+    return `<div class="panel">
+      <div class="row-flex" style="margin-bottom:8px;">
+        <h3 style="margin:0;font-size:17px;">${teamLabel}</h3>
+        ${editable ? `<button class="btn ghost small" onclick="renameTeam('${teamNameField}','${teamLabel.replace(/'/g,"\\'")}')">Rename</button>` : ''}
+      </div>
+      <p class="hint" style="margin:-4px 0 12px;">${skaterCount}/${skaterCap} skaters · ${goalieCount}/${goalieCap} goalie(s)</p>
+      ${body}
+    </div>`;
   };
-  const body = buildSlotDefs(game).map(section=>`
-    ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
-    <div class="line-row" style="grid-template-columns:repeat(${section.slots.length},1fr);">
-      ${section.slots.map(([key,label])=>slotHTML(key,label)).join('')}
-    </div>`).join('');
+
   return `
   <h2 class="section-title">${title}</h2>
   <p class="section-sub">${sub}</p>
   <div class="field" style="max-width:320px;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
   ${editable ? newGameFormHTML() : ''}
-  <div class="role-toggle" style="margin-bottom:16px;">
-    ${TEAMS.map(([key,label])=>`<button class="${activeTeam===key?'active':''}" onclick="activeTeam='${key}';render()">${label}</button>`).join('')}
-  </div>
-  <p class="hint" style="margin:-8px 0 12px;">${skaterCount}/${skaterCap} skaters · ${goalieCount}/${goalieCap} goalie(s) on ${TEAMS.find(t=>t[0]===activeTeam)[1]} (${skaterCap*2} skaters combined across both teams)</p>
-  <div class="panel">${body}</div>`;
+  <div class="grid cols-2" style="align-items:start;">
+    ${teamColumn('A', game.team_a_name || 'Team Light', 'team_a_name')}
+    ${teamColumn('B', game.team_b_name || 'Team Dark', 'team_b_name')}
+  </div>`;
 }
 async function createGame(){
   const label = document.getElementById('newGameLabel').value.trim();
@@ -618,15 +630,24 @@ async function createGame(){
   await loadLines(activeGameId);
   render();
 }
-async function setLineSlot(slotKey, val){
+async function setLineSlot(team, slotKey, val){
   if(val){
-    const { error } = await sb.from('game_lines').upsert({ game_id:activeGameId, team:activeTeam, slot_key:slotKey, player_id:val }, { onConflict:'game_id,team,slot_key' });
+    const { error } = await sb.from('game_lines').upsert({ game_id:activeGameId, team, slot_key:slotKey, player_id:val }, { onConflict:'game_id,team,slot_key' });
     if(error){ showToast('Failed: '+error.message); return; }
   } else {
-    await sb.from('game_lines').delete().eq('game_id', activeGameId).eq('team', activeTeam).eq('slot_key', slotKey);
+    await sb.from('game_lines').delete().eq('game_id', activeGameId).eq('team', team).eq('slot_key', slotKey);
   }
   await loadLines(activeGameId);
   showToast('Lines updated ✓');
+}
+async function renameTeam(field, current){
+  const name = prompt('Team name:', current);
+  if(!name || !name.trim() || name.trim()===current) return;
+  const { error } = await sb.from('games').update({ [field]: name.trim() }).eq('id', activeGameId);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadGames();
+  render();
+  showToast('Team renamed ✓');
 }
 
 /* ---------- MERCH ---------- */
@@ -675,7 +696,10 @@ function renderPostIce(){
     </div>
     <div>
       <h3 style="font-size:14px;color:var(--muted);margin-top:0;">Currently Posted</h3>
-      ${iceTimes.map(s=>{ const n = signups.filter(x=>x.ice_time_id===s.id).length; return `<div class="hint">• ${s.date_label} — ${s.location} (${n}/${s.max_spots})</div>`; }).join('') || '<div class="hint">None yet.</div>'}
+      ${iceTimes.map(s=>{ const n = signups.filter(x=>x.ice_time_id===s.id).length; return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots})</span>
+        <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
+      </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
   </div>`;
 }
@@ -687,6 +711,14 @@ async function postIce(){
   const { error } = await sb.from('ice_times').insert({ date_label, time_label, location, max_spots, league_id:activeLeague });
   if(error){ showToast('Failed: '+error.message); return; }
   showToast('Ice time posted ✓');
+  await loadIceTimes();
+  render();
+}
+async function deleteIceTime(id, label){
+  if(!confirm(`Delete ice time "${label}"? This also removes all player sign-ups for it.`)) return;
+  const { error } = await sb.from('ice_times').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Ice time deleted ✓');
   await loadIceTimes();
   render();
 }
@@ -708,11 +740,12 @@ function renderRoster(){
     <tr><th>Name</th><th>Rank</th><th>Positions</th><th>Actions</th></tr>
     ${roster.map(p=>`<tr>
       <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}</td>
-      <td><span class="tag rank">${p.rank}</span></td>
+      <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
       <td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td>
       <td>
         <button class="btn ghost small" onclick="promoteToggle('${p.id}', ${!p.is_commissioner})">${p.is_commissioner?'Remove Commissioner':'Make Commissioner'}</button>
         <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">${p.claimed?'Reset Password':'Set Password'}</button>
+        <button class="btn ghost small" onclick="deletePlayer('${p.id}','${p.name.replace(/'/g,"\\'")}')">Delete</button>
       </td>
     </tr>`).join('')}
   </table>
@@ -734,12 +767,27 @@ async function promoteToggle(id, makeCommish){
   await loadRoster();
   render();
 }
+async function updatePlayerRank(id, val){
+  const { error } = await sb.from('profiles').update({ rank: Number(val) }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  showToast('Rank updated ✓');
+}
 async function resetPassword(id, name){
   const pw = prompt(`New password for ${name}:`);
   if(!pw) return;
   const result = await callAdmin('reset-password', { target_user_id:id, new_password:pw });
   if(result.error){ showToast('Failed: '+result.error); return; }
   showToast('Password updated ✓');
+}
+async function deletePlayer(id, name){
+  if(id===me.id){ showToast("You can't delete your own account."); return; }
+  if(!confirm(`Permanently delete ${name}? This removes their account, profile, and all sign-ups/line assignments. This cannot be undone.`)) return;
+  const result = await callAdmin('delete-player', { target_user_id:id });
+  if(result.error){ showToast('Failed: '+result.error); return; }
+  showToast('Player deleted ✓');
+  await loadRoster();
+  render();
 }
 
 /* ================= INIT: resume existing session ================= */
