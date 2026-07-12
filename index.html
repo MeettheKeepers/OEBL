@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OEBL — Ottawa East Beer League</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0d12;
+    --panel:#121821;
+    --panel2:#171f2b;
+    --line:#232d3b;
+    --teal:#4fd1d9;
+    --teal-dim:#2f9aa1;
+    --purple:#8a4fd6;
+    --purple-dim:#6a2fc0;
+    --text:#f4f7fa;
+    --muted:#93a1b0;
+    --danger:#e05a5a;
+    --good:#4fd18a;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
+  h1,h2,h3,.display{font-family:'Anton',sans-serif;letter-spacing:1px;text-transform:uppercase;}
+  a{color:inherit;}
+  button{font-family:'Inter',sans-serif;cursor:pointer;}
+  ::selection{background:var(--purple);color:#fff;}
+
+  /* ---------- SIGN IN ---------- */
+  #signin{
+    min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;
+    background:
+      radial-gradient(circle at 50% -10%, rgba(79,209,217,.15), transparent 60%),
+      radial-gradient(circle at 100% 100%, rgba(138,79,214,.12), transparent 50%),
+      var(--bg);
+    padding:24px;
+  }
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:36px 32px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);
+  }
+  .badge{width:120px;height:120px;margin:0 auto 18px;position:relative;}
+  .badge-ring{
+    width:120px;height:120px;border-radius:50%;
+    background:linear-gradient(180deg,var(--teal-dim),var(--bg) 70%);
+    border:3px solid var(--teal);position:relative;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .skyline{
+    position:absolute;bottom:14px;left:0;right:0;height:46px;
+    background:var(--bg);
+    clip-path:polygon(0 100%,0 60%,10% 60%,10% 30%,16% 30%,16% 0%,20% 0%,20% 34%,26% 34%,26% 55%,34% 55%,34% 20%,38% 20%,38% 55%,46% 55%,46% 40%,50% 5%,54% 40%,54% 55%,64% 55%,64% 30%,68% 30%,68% 60%,76% 60%,76% 40%,82% 40%,82% 60%,90% 60%,90% 100%);
+  }
+  .badge-txt{position:absolute;top:14px;font-size:9px;font-family:'Anton',sans-serif;letter-spacing:2px;color:#fff;text-align:center;width:100%;}
+  .badge-star{position:absolute;bottom:8px;font-size:10px;color:var(--purple);width:100%;text-align:center;letter-spacing:6px;}
+  .brand-title{text-align:center;font-size:26px;line-height:1.05;margin:0 0 2px;color:#fff;}
+  .brand-sub{text-align:center;font-size:30px;line-height:1;margin:0 0 6px;color:var(--teal);}
+  .brand-code{text-align:center;color:var(--purple);font-size:13px;letter-spacing:3px;margin-bottom:22px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;}
+  .field input, .field select, .field textarea{
+    width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);font-size:14px;
+  }
+  .field input:focus, .field select:focus{outline:2px solid var(--teal);}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:12px 18px;border-radius:9px;border:none;font-weight:700;font-size:14px;
+    background:linear-gradient(90deg,var(--teal-dim),var(--teal));color:#00252a;width:100%;
+    transition:transform .1s ease;
+  }
+  .btn:hover{transform:translateY(-1px);}
+  .btn.purple{background:linear-gradient(90deg,var(--purple-dim),var(--purple));color:#fff;}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text);width:auto;padding:8px 14px;font-size:13px;}
+  .btn.small{width:auto;padding:8px 14px;font-size:13px;}
+  .btn.danger{background:linear-gradient(90deg,#7a2b2b,var(--danger));color:#fff;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;transform:none;}
+  .signin-footer{text-align:center;margin-top:16px;font-size:13px;color:var(--muted);}
+  .signin-footer a{color:var(--teal);cursor:pointer;text-decoration:underline;}
+  .demo-note{margin-top:22px;font-size:11px;color:var(--muted);text-align:center;max-width:340px;}
+
+  /* ---------- APP SHELL ---------- */
+  #app{display:none;min-height:100vh;}
+  header.top{
+    position:sticky;top:0;z-index:20;
+    background:rgba(10,13,18,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:18px;padding:12px 24px;flex-wrap:wrap;
+  }
+  .mini-badge{width:42px;height:42px;border-radius:50%;background:linear-gradient(180deg,var(--teal-dim),var(--bg) 70%);border:2px solid var(--teal);flex:none;}
+  .titlebox{line-height:1.05;}
+  .titlebox .t1{font-size:16px;color:#fff;}
+  .titlebox .t2{font-size:12px;color:var(--purple);letter-spacing:2px;}
+  nav.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap;}
+  nav.tabs button{
+    background:transparent;border:none;color:var(--muted);padding:9px 14px;border-radius:8px;
+    font-size:13px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+  }
+  nav.tabs button.active{background:var(--panel2);color:var(--teal);}
+  .role-toggle{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:3px;font-size:12px;}
+  .role-toggle button{border-radius:16px;padding:6px 12px;background:transparent;color:var(--muted);font-weight:700;}
+  .role-toggle button.active{background:var(--purple);color:#fff;}
+  .user-chip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);}
+  .user-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--good);}
+
+  main{max-width:1080px;margin:0 auto;padding:28px 24px 80px;}
+  .section-title{font-size:22px;color:#fff;margin:0 0 4px;}
+  .section-sub{color:var(--muted);font-size:13px;margin:0 0 22px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:20px;}
+  .grid{display:grid;gap:16px;}
+  .grid.cols-2{grid-template-columns:1fr 1fr;}
+  .grid.cols-3{grid-template-columns:repeat(3,1fr);}
+  .grid.cols-4{grid-template-columns:repeat(4,1fr);}
+  @media(max-width:800px){.grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr;}}
+
+  /* profile */
+  .rank-display{font-family:'Anton',sans-serif;font-size:56px;color:var(--teal);line-height:1;}
+  input[type=range]{-webkit-appearance:none;width:100%;height:6px;border-radius:4px;background:var(--line);}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--teal);border:3px solid #00252a;cursor:pointer;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{
+    padding:9px 16px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);
+    font-weight:700;font-size:13px;color:var(--muted);
+  }
+  .chip.on{background:var(--purple);border-color:var(--purple);color:#fff;}
+  .toast{
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120%);
+    background:var(--good);color:#04241a;padding:12px 22px;border-radius:10px;font-weight:700;
+    transition:transform .25s ease;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.4);
+  }
+  .toast.show{transform:translateX(-50%) translateY(0);}
+
+  /* ice times */
+  .ice-card{
+    display:flex;justify-content:space-between;align-items:center;gap:14px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;flex-wrap:wrap;
+  }
+  .ice-date{font-family:'Anton',sans-serif;font-size:15px;color:var(--teal);letter-spacing:1px;}
+  .ice-loc{color:var(--muted);font-size:13px;margin-top:2px;}
+  .spots-bar{width:120px;height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px;}
+  .spots-fill{height:100%;background:linear-gradient(90deg,var(--teal-dim),var(--teal));}
+  .tag{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:700;margin-left:6px;}
+  .tag.pos{background:rgba(138,79,214,.18);color:var(--purple);}
+  .tag.rank{background:rgba(79,209,217,.15);color:var(--teal);}
+
+  /* lines */
+  .line-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
+  .slot{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center;}
+  .slot .pos-lbl{font-size:11px;color:var(--muted);letter-spacing:1px;margin-bottom:6px;}
+  .slot select{width:100%;}
+  .slot .name{font-weight:700;font-size:14px;}
+  .goalies{display:flex;gap:12px;}
+  .goalies .slot{flex:1;}
+
+  /* merch */
+  .merch-card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;}
+  .merch-img{height:130px;display:flex;align-items:center;justify-content:center;font-size:44px;
+    background:linear-gradient(135deg,var(--purple-dim),var(--teal-dim));}
+  .merch-body{padding:14px;flex:1;display:flex;flex-direction:column;}
+  .merch-name{font-weight:700;font-size:14px;margin-bottom:2px;}
+  .merch-price{color:var(--teal);font-weight:800;margin-bottom:10px;}
+  .cart-badge{background:var(--purple);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:6px;}
+
+  /* roster table */
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:8px 10px;border-bottom:1px solid var(--line);}
+  td{padding:10px 10px;border-bottom:1px solid var(--line);}
+
+  .empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;}
+  .row-flex{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+</style>
+</head>
+<body>
+
+<!-- ============ SIGN IN SCREEN ============ -->
+<div id="signin">
+  <div class="card">
+    <div class="badge">
+      <div class="badge-ring">
+        <div class="skyline"></div>
+        <div class="badge-txt">OTTAWA EAST</div>
+        <div class="badge-star">★ OEBL ★</div>
+      </div>
+    </div>
+    <h1 class="brand-title">OTTAWA EAST</h1>
+    <div class="brand-sub">BEER LEAGUE</div>
+    <div class="brand-code">— (OEBL) —</div>
+
+    <div id="signinForm">
+      <div class="field" id="nameField" style="display:none;"><label>Name</label><input id="loginName" type="text" placeholder="Jordan Byrne"></div>
+      <div class="field"><label>Email</label><input id="loginEmail" type="email" placeholder="you@example.com"></div>
+      <div class="field"><label>Password</label><input id="loginPass" type="password" placeholder="••••••••"></div>
+      <button class="btn" id="authBtn" onclick="doSignIn()">Sign In</button>
+      <div id="authMsg" class="hint" style="text-align:center;min-height:16px;"></div>
+    </div>
+
+    <div class="signin-footer" id="authToggleRow">New player? <a onclick="toggleAuthMode()">Create account</a></div>
+    <div class="demo-note">Real accounts — sign-in, profile, ice-time bookings, and merch are backed by Supabase. Square checkout is still a placeholder.</div>
+  </div>
+</div>
+
+<!-- ============ MAIN APP ============ -->
+<div id="app">
+  <header class="top">
+    <div class="mini-badge"></div>
+    <div class="titlebox">
+      <div class="t1">OTTAWA EAST BEER LEAGUE</div>
+      <div class="t2">OEBL</div>
+    </div>
+    <nav class="tabs" id="tabs"></nav>
+    <div class="role-toggle" id="roleToggle" style="display:none;">
+      <button id="roleBtnPlayer" onclick="setRole('player')">Player</button>
+      <button id="roleBtnAdmin" onclick="setRole('admin')">Commissioner</button>
+    </div>
+    <div class="user-chip"><span class="dot"></span><span id="userName"></span></div>
+    <button class="btn ghost small" onclick="signOut()">Sign Out</button>
+  </header>
+
+  <main id="main"></main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+/* ================= SUPABASE ================= */
+const SUPABASE_URL = 'https://rseogecrycwmiayvazzn.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_g_Ax6fnYl8Mq6SDdFwzLew_0qE-18Uc';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const POSITIONS = ['LW','C','RW','LD','RD','G'];
+const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
+const SLOT_DEFS = [
+  {grp:'Forward Lines', slots:[['L1_LW','LW'],['L1_C','C'],['L1_RW','RW']]},
+  {grp:null, slots:[['L2_LW','LW'],['L2_C','C'],['L2_RW','RW']]},
+  {grp:'Defense Pairs', slots:[['D1_LD','LD'],['D1_RD','RD']]},
+  {grp:null, slots:[['D2_LD','LD'],['D2_RD','RD']]},
+  {grp:'Goalies', slots:[['G1','G'],['G2','G']]},
+];
+
+let authMode = 'signin'; // 'signin' | 'signup'
+let session = null;
+let me = null; // profile row for current user
+let role = 'player';
+let activeTab = 'profile';
+let cart = [];
+
+let roster = [];        // all profiles (for admin roster/lines)
+let iceTimes = [];      // ice_times rows
+let signups = [];       // ice_time_signups rows
+let games = [];         // games rows
+let activeGameId = null;
+let lines = [];         // game_lines rows for activeGameId
+let merch = [];
+
+/* ================= HELPERS ================= */
+function playerById(id){ return roster.find(p=>p.id===id); }
+function showToast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2400);
+}
+function setMsg(msg, isErr){
+  const el = document.getElementById('authMsg');
+  el.textContent = msg || '';
+  el.style.color = isErr ? 'var(--danger)' : 'var(--good)';
+}
+
+/* ================= AUTH ================= */
+function toggleAuthMode(){
+  authMode = authMode==='signin' ? 'signup' : 'signin';
+  document.getElementById('nameField').style.display = authMode==='signup' ? 'block' : 'none';
+  document.getElementById('authBtn').textContent = authMode==='signup' ? 'Create Account' : 'Sign In';
+  document.getElementById('authBtn').setAttribute('onclick', authMode==='signup' ? 'doSignUp()' : 'doSignIn()');
+  document.getElementById('authToggleRow').innerHTML = authMode==='signup'
+    ? `Already registered? <a onclick="toggleAuthMode()">Sign in</a>`
+    : `New player? <a onclick="toggleAuthMode()">Create account</a>`;
+  setMsg('');
+}
+
+async function doSignUp(){
+  const name = document.getElementById('loginName').value.trim();
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPass').value;
+  if(!name || !email || !password){ setMsg('Fill in name, email, and password.', true); return; }
+  setMsg('Creating account…');
+  const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ name } } });
+  if(error){ setMsg(error.message, true); return; }
+  if(data.session){ await enterApp(data.session); }
+  else { setMsg('Account created — check your email to confirm, then sign in.'); }
+}
+
+async function doSignIn(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPass').value;
+  if(!email || !password){ setMsg('Enter your email and password.', true); return; }
+  setMsg('Signing in…');
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ setMsg(error.message, true); return; }
+  await enterApp(data.session);
+}
+
+async function enterApp(sess){
+  session = sess;
+  const { data: profile, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+  if(error || !profile){ setMsg('Signed in, but no profile found yet — try again in a moment.', true); return; }
+  me = profile;
+  document.getElementById('signin').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('userName').textContent = me.name || me.email;
+  document.getElementById('roleToggle').style.display = me.is_commissioner ? 'flex' : 'none';
+  await Promise.all([loadRoster(), loadIceTimes(), loadMerch(), loadGames()]);
+  setRole('player');
+}
+
+async function signOut(){
+  await sb.auth.signOut();
+  session = null; me = null;
+  document.getElementById('app').style.display='none';
+  document.getElementById('signin').style.display='flex';
+  setMsg('');
+}
+
+/* ================= ROLE / TABS ================= */
+const PLAYER_TABS = [
+  {id:'profile', label:'Profile'},
+  {id:'icetimes', label:'Ice Times'},
+  {id:'lines', label:'Lines'},
+  {id:'merch', label:'Merch'},
+];
+const ADMIN_TABS = [
+  {id:'postice', label:'Post Ice Time'},
+  {id:'setlines', label:'Set Lines'},
+  {id:'roster', label:'Roster'},
+  {id:'merch', label:'Merch'},
+];
+function setRole(r){
+  if(r==='admin' && !me.is_commissioner) return;
+  role = r;
+  document.getElementById('roleBtnPlayer').classList.toggle('active', r==='player');
+  document.getElementById('roleBtnAdmin').classList.toggle('active', r==='admin');
+  const tabs = r==='player' ? PLAYER_TABS : ADMIN_TABS;
+  activeTab = tabs[0].id;
+  renderTabs(tabs);
+  render();
+}
+function renderTabs(tabs){
+  const el = document.getElementById('tabs');
+  el.innerHTML = tabs.map(t=>`<button data-tab="${t.id}" class="${t.id===activeTab?'active':''}" onclick="goTab('${t.id}')">${t.label}</button>`).join('');
+}
+function goTab(id){
+  activeTab = id;
+  const tabs = role==='player' ? PLAYER_TABS : ADMIN_TABS;
+  [...document.querySelectorAll('#tabs button')].forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
+  render();
+}
+
+/* ================= DATA LOADERS ================= */
+async function loadRoster(){
+  const { data } = await sb.from('profiles').select('*').order('name');
+  roster = data || [];
+}
+async function loadIceTimes(){
+  const [{ data: its }, { data: sus }] = await Promise.all([
+    sb.from('ice_times').select('*').order('created_at'),
+    sb.from('ice_time_signups').select('*'),
+  ]);
+  iceTimes = its || [];
+  signups = sus || [];
+}
+async function loadMerch(){
+  const { data } = await sb.from('merch_items').select('*').eq('active', true).order('name');
+  merch = data || [];
+}
+async function loadGames(){
+  const { data } = await sb.from('games').select('*').order('created_at');
+  games = data || [];
+  if(games.length && !activeGameId) activeGameId = games[0].id;
+  if(activeGameId) await loadLines(activeGameId);
+}
+async function loadLines(gameId){
+  const { data } = await sb.from('game_lines').select('*').eq('game_id', gameId);
+  lines = data || [];
+}
+
+/* ================= RENDER ROUTER ================= */
+function render(){
+  const main = document.getElementById('main');
+  if(activeTab==='profile') main.innerHTML = renderProfile();
+  else if(activeTab==='icetimes') main.innerHTML = renderIceTimes();
+  else if(activeTab==='lines') main.innerHTML = renderLinesView();
+  else if(activeTab==='merch') main.innerHTML = renderMerch();
+  else if(activeTab==='postice') main.innerHTML = renderPostIce();
+  else if(activeTab==='setlines') main.innerHTML = renderSetLines();
+  else if(activeTab==='roster') main.innerHTML = renderRoster();
+}
+
+/* ---------- PROFILE ---------- */
+function renderProfile(){
+  return `
+  <h2 class="section-title">My Profile</h2>
+  <p class="section-sub">Set your skill ranking and eligible positions — the commissioner uses this to build balanced lines.</p>
+  <div class="panel grid cols-2">
+    <div>
+      <div class="field"><label>Name</label><input id="pName" value="${me.name||''}"></div>
+      <div class="field"><label>Email</label><input value="${me.email||''}" disabled></div>
+      <div class="field">
+        <label>Positions (select all that apply)</label>
+        <div class="chips" id="posChips">
+          ${POSITIONS.map(p=>`<div class="chip ${me.positions.includes(p)?'on':''}" onclick="togglePos('${p}')">${p}</div>`).join('')}
+        </div>
+      </div>
+      <button class="btn purple" style="margin-top:10px" onclick="saveProfile()">Save Profile</button>
+    </div>
+    <div style="text-align:center;">
+      <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Ranking</label>
+      <div class="rank-display" id="rankNum">${me.rank}</div>
+      <div class="hint" style="margin-bottom:10px;">1 = just here for beers · 10 = should be in juniors</div>
+      <input type="range" min="1" max="10" value="${me.rank}" oninput="updateRank(this.value)">
+    </div>
+  </div>`;
+}
+function togglePos(p){
+  const i = me.positions.indexOf(p);
+  if(i>-1) me.positions.splice(i,1); else me.positions.push(p);
+  render();
+}
+function updateRank(v){
+  me.rank = Number(v);
+  document.getElementById('rankNum').textContent = v;
+}
+async function saveProfile(){
+  me.name = document.getElementById('pName').value || me.name;
+  const { error } = await sb.from('profiles').update({ name: me.name, rank: me.rank, positions: me.positions }).eq('id', me.id);
+  if(error){ showToast('Save failed: '+error.message); return; }
+  document.getElementById('userName').textContent = me.name;
+  await loadRoster();
+  showToast('Profile saved ✓');
+}
+
+/* ---------- ICE TIMES ---------- */
+function renderIceTimes(){
+  return `
+  <h2 class="section-title">Upcoming Ice Times</h2>
+  <p class="section-sub">Pick the sessions you're in for. Spots are first-come, first-served.</p>
+  ${iceTimes.length ? iceTimes.map(s=>{
+    const claimedFor = signups.filter(x=>x.ice_time_id===s.id);
+    const pct = Math.round(claimedFor.length/s.max_spots*100);
+    const inIt = claimedFor.some(x=>x.user_id===me.id);
+    return `<div class="ice-card">
+      <div>
+        <div class="ice-date">${s.date_label} · ${s.time_label}</div>
+        <div class="ice-loc">📍 ${s.location}</div>
+        <div class="spots-bar"><div class="spots-fill" style="width:${pct}%"></div></div>
+        <div class="hint">${claimedFor.length}/${s.max_spots} spots filled</div>
+      </div>
+      <button class="btn ${inIt?'danger':'purple'} small" onclick="toggleIce('${s.id}')">${inIt?'Leave':'Claim Spot'}</button>
+    </div>`;
+  }).join('') : '<div class="empty">No ice times posted yet.</div>'}
+  `;
+}
+async function toggleIce(id){
+  const already = signups.find(x=>x.ice_time_id===id && x.user_id===me.id);
+  if(already){
+    const { error } = await sb.from('ice_time_signups').delete().eq('id', already.id);
+    if(error){ showToast('Failed: '+error.message); return; }
+    showToast('Removed from session');
+  } else {
+    const { error } = await sb.from('ice_time_signups').insert({ ice_time_id:id, user_id:me.id });
+    if(error){ showToast('Failed: '+error.message); return; }
+    showToast("You're in! ✓");
+  }
+  await loadIceTimes();
+  render();
+}
+
+/* ---------- LINES ---------- */
+function renderLinesView(){ return linesScreen(false); }
+function renderSetLines(){ return linesScreen(true); }
+
+function linesScreen(editable){
+  const title = editable ? 'Set Lines' : 'Game Lines';
+  const sub = editable ? 'Assign roster players to each slot for the selected game.' : "Lines set by the commissioner for the selected game.";
+  if(!games.length){
+    return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
+    ${editable ? `<div class="panel"><div class="field"><label>New Game Label</label><input id="newGameLabel" placeholder="e.g. Tue Jul 21 — Richcraft Sensplex"></div><button class="btn purple" onclick="createGame()">Create Game</button></div>` : '<div class="empty">No games created yet.</div>'}`;
+  }
+  const opts = games.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${g.label}</option>`).join('');
+  const lineup = (slotKey)=>{ const row = lines.find(l=>l.slot_key===slotKey); return row ? row.player_id : null; };
+  const slotHTML = (slotKey,label)=>{
+    const pid = lineup(slotKey);
+    const p = pid ? playerById(pid) : null;
+    if(editable){
+      const options = roster.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}</option>`).join('');
+      return `<div class="slot"><div class="pos-lbl">${label}</div>
+        <select onchange="setLineSlot('${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
+    }
+    return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p?`<span class="tag rank">${p.rank}</span>`:''}</div>`;
+  };
+  const body = SLOT_DEFS.map(section=>`
+    ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
+    <div class="line-row" style="grid-template-columns:repeat(${section.slots.length},1fr);">
+      ${section.slots.map(([key,label])=>slotHTML(key,label)).join('')}
+    </div>`).join('');
+  return `
+  <h2 class="section-title">${title}</h2>
+  <p class="section-sub">${sub}</p>
+  <div class="row-flex">
+    <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
+    ${editable ? `<button class="btn ghost small" onclick="promptNewGame()">+ New Game</button>` : ''}
+  </div>
+  <div class="panel">${body}</div>`;
+}
+async function promptNewGame(){
+  const label = prompt('Label for the new game (e.g. "Tue Jul 21 — Richcraft Sensplex"):');
+  if(!label) return;
+  const { data, error } = await sb.from('games').insert({ label }).select().single();
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadGames();
+  activeGameId = data.id;
+  await loadLines(activeGameId);
+  render();
+}
+async function createGame(){
+  const label = document.getElementById('newGameLabel').value.trim();
+  if(!label) return;
+  const { data, error } = await sb.from('games').insert({ label }).select().single();
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadGames();
+  activeGameId = data.id;
+  await loadLines(activeGameId);
+  render();
+}
+async function setLineSlot(slotKey, val){
+  if(val){
+    const { error } = await sb.from('game_lines').upsert({ game_id:activeGameId, slot_key:slotKey, player_id:val }, { onConflict:'game_id,slot_key' });
+    if(error){ showToast('Failed: '+error.message); return; }
+  } else {
+    await sb.from('game_lines').delete().eq('game_id', activeGameId).eq('slot_key', slotKey);
+  }
+  await loadLines(activeGameId);
+  showToast('Lines updated ✓');
+}
+
+/* ---------- MERCH ---------- */
+function renderMerch(){
+  return `
+  <div class="row-flex">
+    <div><h2 class="section-title" style="margin-bottom:0;">Team Merch</h2><p class="section-sub">Represent the league.</p></div>
+    <div class="hint">Cart: <span class="cart-badge">${cart.length}</span></div>
+  </div>
+  <div class="grid cols-4">
+    ${merch.map(m=>`
+      <div class="merch-card">
+        <div class="merch-img">${m.icon||'🏒'}</div>
+        <div class="merch-body">
+          <div class="merch-name">${m.name}</div>
+          <div class="merch-price">$${(m.price_cents/100).toFixed(2)}</div>
+          <button class="btn small" onclick="addToCart('${m.id}')">Add to Cart</button>
+        </div>
+      </div>`).join('')}
+  </div>
+  <div class="panel" style="margin-top:20px;">
+    <div class="row-flex">
+      <div>
+        <strong>Checkout</strong>
+        <div class="hint">Total: $${(cart.reduce((a,id)=>a+merch.find(m=>m.id===id).price_cents,0)/100).toFixed(2)} · Card payments via Square</div>
+      </div>
+      <button class="btn purple" style="width:auto" onclick="alert('Coming soon: this will hand off to Square Checkout once your Square account is connected.')" ${cart.length?'':'disabled'}>Checkout with Square</button>
+    </div>
+  </div>
+  `;
+}
+function addToCart(id){ cart.push(id); showToast('Added to cart'); render(); }
+
+/* ---------- ADMIN: POST ICE TIME ---------- */
+function renderPostIce(){
+  return `
+  <h2 class="section-title">Post New Ice Time</h2>
+  <p class="section-sub">Open a new session for players to sign up for.</p>
+  <div class="panel grid cols-2">
+    <div>
+      <div class="field"><label>Location</label><select id="newLoc">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
+      <div class="field"><label>Date</label><input id="newDate" placeholder="e.g. Tue Jul 21"></div>
+      <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM"></div>
+      <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="18"></div>
+      <button class="btn purple" onclick="postIce()">Post Ice Time</button>
+    </div>
+    <div>
+      <h3 style="font-size:14px;color:var(--muted);margin-top:0;">Currently Posted</h3>
+      ${iceTimes.map(s=>{ const n = signups.filter(x=>x.ice_time_id===s.id).length; return `<div class="hint">• ${s.date_label} — ${s.location} (${n}/${s.max_spots})</div>`; }).join('') || '<div class="hint">None yet.</div>'}
+    </div>
+  </div>`;
+}
+async function postIce(){
+  const date_label = document.getElementById('newDate').value || 'TBD';
+  const time_label = document.getElementById('newTime').value || 'TBD';
+  const location = document.getElementById('newLoc').value;
+  const max_spots = Number(document.getElementById('newMax').value)||18;
+  const { error } = await sb.from('ice_times').insert({ date_label, time_label, location, max_spots });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Ice time posted ✓');
+  await loadIceTimes();
+  render();
+}
+
+/* ---------- ADMIN: ROSTER ---------- */
+function renderRoster(){
+  return `
+  <h2 class="section-title">Roster</h2>
+  <p class="section-sub">${roster.length} registered players.</p>
+  <div class="panel">
+  <table>
+    <tr><th>Name</th><th>Rank</th><th>Positions</th></tr>
+    ${roster.map(p=>`<tr><td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}</td><td><span class="tag rank">${p.rank}</span></td><td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td></tr>`).join('')}
+  </table>
+  </div>`;
+}
+
+/* ================= INIT: resume existing session ================= */
+(async function init(){
+  const { data } = await sb.auth.getSession();
+  if(data.session){ await enterApp(data.session); }
+})();
+</script>
+</body>
+</html>
