@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OEBL — Ottawa East Beer League</title>
+<title>OBL — Ottawa Beer League</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -105,6 +105,23 @@
   .user-chip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);}
   .user-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--good);}
 
+  nav.league-tabs{
+    display:flex;gap:2px;max-width:1080px;margin:0 auto;padding:0 24px;
+    border-bottom:1px solid var(--line);
+  }
+  nav.league-tabs button{
+    flex:1;background:transparent;border:none;border-bottom:3px solid transparent;
+    padding:12px 10px 10px;color:var(--muted);text-align:center;
+  }
+  nav.league-tabs button .lg-code{
+    display:block;font-family:'Anton',sans-serif;font-size:17px;letter-spacing:1px;color:inherit;
+  }
+  nav.league-tabs button .lg-name{
+    display:block;font-size:10px;letter-spacing:.5px;color:var(--muted);margin-top:2px;text-transform:none;font-weight:600;
+  }
+  nav.league-tabs button.active{border-bottom-color:var(--teal);}
+  nav.league-tabs button.active .lg-code{color:var(--teal);}
+
   main{max-width:1080px;margin:0 auto;padding:28px 24px 80px;}
   .section-title{font-size:22px;color:#fff;margin:0 0 4px;}
   .section-sub{color:var(--muted);font-size:13px;margin:0 0 22px;}
@@ -181,13 +198,13 @@
     <div class="badge">
       <div class="badge-ring">
         <div class="skyline"></div>
-        <div class="badge-txt">OTTAWA EAST</div>
-        <div class="badge-star">★ OEBL ★</div>
+        <div class="badge-txt">OTTAWA</div>
+        <div class="badge-star">★ OBL ★</div>
       </div>
     </div>
-    <h1 class="brand-title">OTTAWA EAST</h1>
+    <h1 class="brand-title">OTTAWA</h1>
     <div class="brand-sub">BEER LEAGUE</div>
-    <div class="brand-code">— (OEBL) —</div>
+    <div class="brand-code">— (OBL) —</div>
 
     <div id="signinForm">
       <div class="field"><label>Name</label><input id="loginName" type="text" placeholder="Jordan Byrne"></div>
@@ -206,8 +223,8 @@
   <header class="top">
     <div class="mini-badge"></div>
     <div class="titlebox">
-      <div class="t1">OTTAWA EAST BEER LEAGUE</div>
-      <div class="t2">OEBL</div>
+      <div class="t1">OTTAWA BEER LEAGUE</div>
+      <div class="t2">OBL</div>
     </div>
     <nav class="tabs" id="tabs"></nav>
     <div class="role-toggle" id="roleToggle" style="display:none;">
@@ -217,6 +234,8 @@
     <div class="user-chip"><span class="dot"></span><span id="userName"></span></div>
     <button class="btn ghost small" onclick="signOut()">Sign Out</button>
   </header>
+
+  <nav class="league-tabs" id="leagueTabs"></nav>
 
   <main id="main"></main>
 </div>
@@ -243,6 +262,12 @@ async function callAdmin(action, extra){
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
 const TEAMS = [['A','Team A'], ['B','Team B']];
+const LEAGUES = [
+  ['OEBL','Ottawa East Beer League'],
+  ['OWBL','Ottawa West Beer League'],
+  ['OSBL','Ottawa South Beer League'],
+  ['OCBL','Ottawa Central Beer League'],
+];
 // Per-game slot layout is built dynamically by buildSlotDefs() based on each game's format (see LINES section below).
 
 let authMode = 'signin'; // 'signin' | 'signup'
@@ -250,6 +275,7 @@ let session = null;
 let me = null; // profile row for current user
 let role = 'player';
 let activeTab = 'profile';
+let activeLeague = 'OEBL'; // shared account, but ice times/games/merch are scoped per league
 let cart = [];
 
 let roster = [];        // all profiles (for admin roster/lines)
@@ -263,6 +289,7 @@ let merch = [];
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
+function leagueName(code){ const l = LEAGUES.find(x=>x[0]===(code||activeLeague)); return l ? l[1] : activeLeague; }
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2400);
@@ -315,8 +342,30 @@ async function enterApp(sess){
   document.getElementById('app').style.display='block';
   document.getElementById('userName').textContent = me.name || me.email;
   document.getElementById('roleToggle').style.display = me.is_commissioner ? 'flex' : 'none';
-  await Promise.all([loadRoster(), loadIceTimes(), loadMerch(), loadGames()]);
+  renderLeagueTabs();
+  await loadRoster();
+  await loadLeagueData();
   setRole('player');
+}
+
+/* ================= LEAGUES ================= */
+function renderLeagueTabs(){
+  const el = document.getElementById('leagueTabs');
+  el.innerHTML = LEAGUES.map(([code,name])=>`
+    <button class="${code===activeLeague?'active':''}" onclick="setLeague('${code}')">
+      <span class="lg-code">${code}</span><span class="lg-name">${name}</span>
+    </button>`).join('');
+}
+async function setLeague(code){
+  if(code===activeLeague) return;
+  activeLeague = code;
+  activeGameId = null;
+  renderLeagueTabs();
+  await loadLeagueData();
+  render();
+}
+async function loadLeagueData(){
+  await Promise.all([loadIceTimes(), loadMerch(), loadGames()]);
 }
 
 async function signOut(){
@@ -368,18 +417,18 @@ async function loadRoster(){
 }
 async function loadIceTimes(){
   const [{ data: its }, { data: sus }] = await Promise.all([
-    sb.from('ice_times').select('*').order('created_at'),
+    sb.from('ice_times').select('*').eq('league_id', activeLeague).order('created_at'),
     sb.from('ice_time_signups').select('*'),
   ]);
   iceTimes = its || [];
   signups = sus || [];
 }
 async function loadMerch(){
-  const { data } = await sb.from('merch_items').select('*').eq('active', true).order('name');
+  const { data } = await sb.from('merch_items').select('*').eq('active', true).eq('league_id', activeLeague).order('name');
   merch = data || [];
 }
 async function loadGames(){
-  const { data } = await sb.from('games').select('*').order('created_at');
+  const { data } = await sb.from('games').select('*').eq('league_id', activeLeague).order('created_at');
   games = data || [];
   if(games.length && !activeGameId) activeGameId = games[0].id;
   if(activeGameId) await loadLines(activeGameId);
@@ -447,8 +496,8 @@ async function saveProfile(){
 /* ---------- ICE TIMES ---------- */
 function renderIceTimes(){
   return `
-  <h2 class="section-title">Upcoming Ice Times</h2>
-  <p class="section-sub">Pick the sessions you're in for. Spots are first-come, first-served.</p>
+  <h2 class="section-title">Upcoming Ice Times — ${activeLeague}</h2>
+  <p class="section-sub">Pick the sessions you're in for in ${leagueName()}. Spots are first-come, first-served.</p>
   ${iceTimes.length ? iceTimes.map(s=>{
     const claimedFor = signups.filter(x=>x.ice_time_id===s.id);
     const pct = Math.round(claimedFor.length/s.max_spots*100);
@@ -517,8 +566,8 @@ function newGameFormHTML(){
   </div>`;
 }
 function linesScreen(editable){
-  const title = editable ? 'Set Lines' : 'Game Lines';
-  const sub = editable ? 'Assign roster players to each slot, per team, for the selected game.' : "Lines set by the commissioner for the selected game — two teams.";
+  const title = (editable ? 'Set Lines' : 'Game Lines') + ' — ' + activeLeague;
+  const sub = editable ? `Assign roster players to each slot, per team, for the selected ${activeLeague} game.` : `Lines set by the commissioner for the selected ${activeLeague} game — two teams.`;
   if(!games.length){
     return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
     ${editable ? newGameFormHTML() : '<div class="empty">No games created yet.</div>'}`;
@@ -562,7 +611,7 @@ async function createGame(){
   if(!label) return;
   const formatKey = document.getElementById('newGameFormat').value;
   const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
-  const { data, error } = await sb.from('games').insert({ label, fwd_lines:fmt.fwd_lines, def_pairs:fmt.def_pairs, goalies:fmt.goalies }).select().single();
+  const { data, error } = await sb.from('games').insert({ label, league_id:activeLeague, fwd_lines:fmt.fwd_lines, def_pairs:fmt.def_pairs, goalies:fmt.goalies }).select().single();
   if(error){ showToast('Failed: '+error.message); return; }
   await loadGames();
   activeGameId = data.id;
@@ -584,7 +633,7 @@ async function setLineSlot(slotKey, val){
 function renderMerch(){
   return `
   <div class="row-flex">
-    <div><h2 class="section-title" style="margin-bottom:0;">Team Merch</h2><p class="section-sub">Represent the league.</p></div>
+    <div><h2 class="section-title" style="margin-bottom:0;">${activeLeague} Merch</h2><p class="section-sub">Represent ${leagueName()}.</p></div>
     <div class="hint">Cart: <span class="cart-badge">${cart.length}</span></div>
   </div>
   <div class="grid cols-4">
@@ -614,8 +663,8 @@ function addToCart(id){ cart.push(id); showToast('Added to cart'); render(); }
 /* ---------- ADMIN: POST ICE TIME ---------- */
 function renderPostIce(){
   return `
-  <h2 class="section-title">Post New Ice Time</h2>
-  <p class="section-sub">Open a new session for players to sign up for.</p>
+  <h2 class="section-title">Post New Ice Time — ${activeLeague}</h2>
+  <p class="section-sub">Open a new session for ${leagueName()} players to sign up for.</p>
   <div class="panel grid cols-2">
     <div>
       <div class="field"><label>Location</label><select id="newLoc">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
@@ -635,7 +684,7 @@ async function postIce(){
   const time_label = document.getElementById('newTime').value || 'TBD';
   const location = document.getElementById('newLoc').value;
   const max_spots = Number(document.getElementById('newMax').value)||18;
-  const { error } = await sb.from('ice_times').insert({ date_label, time_label, location, max_spots });
+  const { error } = await sb.from('ice_times').insert({ date_label, time_label, location, max_spots, league_id:activeLeague });
   if(error){ showToast('Failed: '+error.message); return; }
   showToast('Ice time posted ✓');
   await loadIceTimes();
