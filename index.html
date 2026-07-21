@@ -283,7 +283,7 @@ let authMode = 'signin'; // 'signin' | 'signup'
 let session = null;
 let me = null; // profile row for current user
 let role = 'player';
-let activeTab = 'profile';
+let activeTab = 'dashboard';
 let activeLeague = 'OEBL'; // shared account, but ice times/games/merch are scoped per league
 let cart = [];
 
@@ -294,6 +294,8 @@ let activeGameId = null; // id of the ice_time currently selected for lines
 let activeTeam = 'A';
 let lines = [];         // game_lines rows for activeGameId (both teams)
 let merch = [];
+let allStats = [];      // game_stats rows (all games, filtered client-side to activeLeague's ice times)
+let activeStatsGameId = null; // id of the ice_time currently selected in Set Stats
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
@@ -373,7 +375,7 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats()]);
 }
 
 async function signOut(){
@@ -386,14 +388,17 @@ async function signOut(){
 
 /* ================= ROLE / TABS ================= */
 const PLAYER_TABS = [
+  {id:'dashboard', label:'Dashboard'},
   {id:'profile', label:'Profile'},
   {id:'icetimes', label:'Ice Times'},
   {id:'lines', label:'Lines'},
+  {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
 ];
 const ADMIN_TABS = [
   {id:'postice', label:'Post Ice Time'},
   {id:'setlines', label:'Set Lines'},
+  {id:'setstats', label:'Set Stats'},
   {id:'roster', label:'Roster'},
   {id:'merch', label:'Merch'},
 ];
@@ -425,7 +430,7 @@ async function loadRoster(){
 }
 async function loadIceTimes(){
   const [{ data: its }, { data: sus }] = await Promise.all([
-    sb.from('ice_times').select('*').eq('league_id', activeLeague).order('created_at'),
+    sb.from('ice_times').select('*').eq('league_id', activeLeague).order('game_date'),
     sb.from('ice_time_signups').select('*'),
   ]);
   iceTimes = its || [];
@@ -434,10 +439,16 @@ async function loadIceTimes(){
   if(iceTimes.length && !activeGameId) activeGameId = iceTimes[0].id;
   if(activeGameId) await loadLines(activeGameId);
   else lines = [];
+  if(activeStatsGameId && !iceTimes.find(g=>g.id===activeStatsGameId)) activeStatsGameId = null;
+  if(iceTimes.length && !activeStatsGameId) activeStatsGameId = iceTimes[0].id;
 }
 async function loadMerch(){
   const { data } = await sb.from('merch_items').select('*').eq('active', true).eq('league_id', activeLeague).order('name');
   merch = data || [];
+}
+async function loadStats(){
+  const { data } = await sb.from('game_stats').select('*');
+  allStats = data || [];
 }
 async function loadLines(gameId){
   const { data } = await sb.from('game_lines').select('*').eq('game_id', gameId);
@@ -447,13 +458,56 @@ async function loadLines(gameId){
 /* ================= RENDER ROUTER ================= */
 function render(){
   const main = document.getElementById('main');
-  if(activeTab==='profile') main.innerHTML = renderProfile();
+  if(activeTab==='dashboard') main.innerHTML = renderDashboard();
+  else if(activeTab==='profile') main.innerHTML = renderProfile();
   else if(activeTab==='icetimes') main.innerHTML = renderIceTimes();
   else if(activeTab==='lines') main.innerHTML = renderLinesView();
+  else if(activeTab==='stats') main.innerHTML = renderStats();
   else if(activeTab==='merch') main.innerHTML = renderMerch();
   else if(activeTab==='postice') main.innerHTML = renderPostIce();
   else if(activeTab==='setlines') main.innerHTML = renderSetLines();
+  else if(activeTab==='setstats') main.innerHTML = renderSetStats();
   else if(activeTab==='roster') main.innerHTML = renderRoster();
+}
+
+/* ---------- DASHBOARD ---------- */
+function renderDashboard(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const weekOut = new Date(today); weekOut.setDate(weekOut.getDate()+7);
+  const upcoming = iceTimes
+    .filter(it=>{
+      if(!it.game_date) return false;
+      const d = new Date(it.game_date+'T00:00:00');
+      return d >= today && d <= weekOut;
+    })
+    .sort((a,b)=> (a.game_date||'').localeCompare(b.game_date||''));
+
+  const myStats = allStats.filter(s=>s.player_id===me.id && iceTimes.some(it=>it.id===s.game_id));
+  const totalGoals = myStats.reduce((a,s)=>a+s.goals,0);
+  const totalAssists = myStats.reduce((a,s)=>a+s.assists,0);
+
+  return `
+  <h2 class="section-title">Dashboard — ${activeLeague}</h2>
+  <p class="section-sub">Your snapshot for ${leagueName()}.</p>
+  <div class="grid cols-2">
+    <div class="panel">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">My Profile</h3>
+      <div style="font-size:18px;font-weight:700;margin-bottom:6px;">${me.name}</div>
+      <div class="hint" style="margin-bottom:10px;">Skill Ranking: <span class="tag rank">${me.rank}</span></div>
+      <div class="chips">${(me.positions||[]).length ? me.positions.map(p=>`<span class="tag pos">${p}</span>`).join('') : '<span class="hint">No positions set yet</span>'}</div>
+      <div class="hint" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
+        Season Total: <strong style="color:var(--text)">${totalGoals} G · ${totalAssists} A · ${totalGoals+totalAssists} PTS</strong>
+      </div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Next 7 Days</h3>
+      ${upcoming.length ? upcoming.map(it=>`
+        <div style="padding:10px 0;border-bottom:1px solid var(--line);">
+          <div class="ice-date">${iceTimeLabel(it)}</div>
+          <div class="ice-loc">${it.time_label}</div>
+        </div>`).join('') : '<div class="empty">No games in the next 7 days.</div>'}
+    </div>
+  </div>`;
 }
 
 /* ---------- PROFILE ---------- */
@@ -634,6 +688,34 @@ async function renameTeam(field, current){
   showToast('Team renamed ✓');
 }
 
+/* ---------- STATS ---------- */
+function renderStats(){
+  const rows = allStats
+    .filter(s=>s.player_id===me.id)
+    .map(s=>({ stat:s, game: iceTimes.find(it=>it.id===s.game_id) }))
+    .filter(r=>r.game)
+    .sort((a,b)=> (a.game.game_date||'').localeCompare(b.game.game_date||''));
+  const totalGoals = rows.reduce((a,r)=>a+r.stat.goals,0);
+  const totalAssists = rows.reduce((a,r)=>a+r.stat.assists,0);
+  return `
+  <h2 class="section-title">My Stats — ${activeLeague}</h2>
+  <p class="section-sub">Goals and assists recorded by the commissioner, linked to each game.</p>
+  <div class="panel">
+  <table>
+    <tr><th>Game</th><th>Goals</th><th>Assists</th><th>Points</th></tr>
+    ${rows.length ? rows.map(r=>`<tr>
+      <td>${iceTimeLabel(r.game)}</td>
+      <td>${r.stat.goals}</td>
+      <td>${r.stat.assists}</td>
+      <td>${r.stat.goals + r.stat.assists}</td>
+    </tr>`).join('') : `<tr><td colspan="4" class="hint">No stats recorded yet.</td></tr>`}
+    <tr style="border-top:2px solid var(--line);font-weight:700;">
+      <td>Total</td><td>${totalGoals}</td><td>${totalAssists}</td><td>${totalGoals+totalAssists}</td>
+    </tr>
+  </table>
+  </div>`;
+}
+
 /* ---------- MERCH ---------- */
 function renderMerch(){
   return `
@@ -673,7 +755,7 @@ function renderPostIce(){
   <div class="panel grid cols-2">
     <div>
       <div class="field"><label>Location</label><select id="newLoc">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
-      <div class="field"><label>Date</label><input id="newDate" placeholder="e.g. Tue Jul 21"></div>
+      <div class="field"><label>Date</label><input id="newDate" type="date"></div>
       <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM"></div>
       <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="18"></div>
       <div class="field"><label>Roster Format (for lines)</label>
@@ -693,15 +775,22 @@ function renderPostIce(){
     </div>
   </div>`;
 }
+function formatDateLabel(dateStr){
+  if(!dateStr) return 'TBD';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+}
 async function postIce(){
-  const date_label = document.getElementById('newDate').value || 'TBD';
+  const game_date = document.getElementById('newDate').value;
+  if(!game_date){ showToast('Pick a date first'); return; }
+  const date_label = formatDateLabel(game_date);
   const time_label = document.getElementById('newTime').value || 'TBD';
   const location = document.getElementById('newLoc').value;
   const max_spots = Number(document.getElementById('newMax').value)||18;
   const formatKey = document.getElementById('newFormat').value;
   const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
   const { error } = await sb.from('ice_times').insert({
-    date_label, time_label, location, max_spots, league_id:activeLeague,
+    date_label, game_date, time_label, location, max_spots, league_id:activeLeague,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies,
   });
   if(error){ showToast('Failed: '+error.message); return; }
@@ -717,6 +806,47 @@ async function deleteIceTime(id, label){
   showToast('Ice time deleted ✓');
   await loadIceTimes();
   render();
+}
+
+/* ---------- ADMIN: SET STATS ---------- */
+function renderSetStats(){
+  if(!iceTimes.length){
+    return `<h2 class="section-title">Set Stats — ${activeLeague}</h2>
+    <p class="section-sub">Log goals and assists per player for each ${activeLeague} game.</p>
+    <div class="empty">No ice times posted yet.</div>`;
+  }
+  const game = iceTimes.find(g=>g.id===activeStatsGameId) || iceTimes[0];
+  const opts = iceTimes.map(g=>`<option value="${g.id}" ${g.id===game.id?'selected':''}>${iceTimeLabel(g)}</option>`).join('');
+  const statFor = (pid)=> allStats.find(s=>s.game_id===game.id && s.player_id===pid) || { goals:0, assists:0 };
+  const rows = roster.map(p=>{
+    const s = statFor(p.id);
+    return `<tr>
+      <td>${p.name}</td>
+      <td><input type="number" min="0" style="width:64px;" value="${s.goals}" onchange="setStat('${game.id}','${p.id}','goals',this.value)"></td>
+      <td><input type="number" min="0" style="width:64px;" value="${s.assists}" onchange="setStat('${game.id}','${p.id}','assists',this.value)"></td>
+    </tr>`;
+  }).join('');
+  return `
+  <h2 class="section-title">Set Stats — ${activeLeague}</h2>
+  <p class="section-sub">Log goals and assists per player for the selected ${activeLeague} game.</p>
+  <div class="field" style="max-width:320px;"><select onchange="activeStatsGameId=this.value;render()">${opts}</select></div>
+  <div class="panel">
+  <table>
+    <tr><th>Player</th><th>Goals</th><th>Assists</th></tr>
+    ${rows}
+  </table>
+  </div>`;
+}
+async function setStat(gameId, playerId, field, val){
+  const n = Math.max(0, Number(val)||0);
+  const existing = allStats.find(s=>s.game_id===gameId && s.player_id===playerId);
+  const payload = { game_id:gameId, player_id:playerId, goals: existing?existing.goals:0, assists: existing?existing.assists:0 };
+  payload[field] = n;
+  const { error } = await sb.from('game_stats').upsert(payload, { onConflict:'game_id,player_id' });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadStats();
+  render();
+  showToast('Stat updated ✓');
 }
 
 /* ---------- ADMIN: ROSTER ---------- */
