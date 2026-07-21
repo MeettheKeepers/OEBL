@@ -269,6 +269,7 @@ async function callAdmin(action, extra){
 }
 
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
 const TEAMS = [['A','Team Light'], ['B','Team Dark']];
 const LEAGUES = [
@@ -348,6 +349,7 @@ async function enterApp(sess){
   const { data: profile, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if(error || !profile){ setMsg('Signed in, but no profile found yet — try again in a moment.', true); return; }
   me = profile;
+  me.availability = me.availability || {};
   document.getElementById('signin').style.display='none';
   document.getElementById('app').style.display='block';
   document.getElementById('userName').textContent = me.name || me.email;
@@ -533,6 +535,19 @@ function renderProfile(){
       <div class="hint" style="margin-bottom:10px;">1 = just here for beers · 10 = should be in juniors</div>
       <input type="range" min="1" max="10" value="${me.rank}" oninput="updateRank(this.value)">
     </div>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Days &amp; Times</h3>
+    <p class="hint" style="margin-bottom:10px;">Select the days you're usually available — the commissioner uses this to help pick ice times.</p>
+    <div class="chips" id="dayChips">
+      ${DAYS.map(d=>`<div class="chip ${me.availability[d]!==undefined?'on':''}" onclick="toggleDay('${d}')">${d}</div>`).join('')}
+    </div>
+    ${DAYS.filter(d=>me.availability[d]!==undefined).map(d=>`
+      <div class="field" style="max-width:320px;margin-top:12px;">
+        <label>Preferred time — ${d}</label>
+        <input value="${me.availability[d]||''}" placeholder="e.g. 7:00–9:00 PM" oninput="updateDayTime('${d}', this.value)">
+      </div>`).join('')}
+    <button class="btn purple" style="margin-top:14px" onclick="saveProfile()">Save Profile</button>
   </div>`;
 }
 function togglePos(p){
@@ -540,13 +555,25 @@ function togglePos(p){
   if(i>-1) me.positions.splice(i,1); else me.positions.push(p);
   render();
 }
+function toggleDay(d){
+  if(me.availability[d] !== undefined){
+    const { [d]: _drop, ...rest } = me.availability;
+    me.availability = rest;
+  } else {
+    me.availability = { ...me.availability, [d]: '' };
+  }
+  render();
+}
+function updateDayTime(d, val){
+  me.availability[d] = val;
+}
 function updateRank(v){
   me.rank = Number(v);
   document.getElementById('rankNum').textContent = v;
 }
 async function saveProfile(){
   me.name = document.getElementById('pName').value || me.name;
-  const { error } = await sb.from('profiles').update({ name: me.name, rank: me.rank, positions: me.positions }).eq('id', me.id);
+  const { error } = await sb.from('profiles').update({ name: me.name, rank: me.rank, positions: me.positions, availability: me.availability }).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
   document.getElementById('userName').textContent = me.name;
   await loadRoster();
@@ -752,6 +779,7 @@ function renderPostIce(){
   return `
   <h2 class="section-title">Post New Ice Time — ${activeLeague}</h2>
   <p class="section-sub">Open a new session for ${leagueName()} players to sign up for.</p>
+  ${availabilitySummaryHTML()}
   <div class="panel grid cols-2">
     <div>
       <div class="field"><label>Location</label><select id="newLoc">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
@@ -850,10 +878,47 @@ async function setStat(gameId, playerId, field, val){
 }
 
 /* ---------- ADMIN: ROSTER ---------- */
+function availabilitySummary(p){
+  const av = p.availability || {};
+  const days = DAYS.filter(d=>av[d]!==undefined);
+  if(!days.length) return '<span class="hint">—</span>';
+  return days.map(d=>`<span class="tag pos">${d}${av[d]?': '+av[d]:''}</span>`).join(' ');
+}
+function availabilityAggregate(){
+  const counts = {}; const times = {};
+  DAYS.forEach(d=>{ counts[d]=0; times[d]=[]; });
+  roster.forEach(p=>{
+    const av = p.availability || {};
+    DAYS.forEach(d=>{
+      if(av[d]!==undefined){
+        counts[d]++;
+        if(av[d]) times[d].push(av[d]);
+      }
+    });
+  });
+  return DAYS.map(d=>({ day:d, count:counts[d], times:times[d] }));
+}
+function availabilitySummaryHTML(){
+  const rows = availabilityAggregate();
+  const maxCount = Math.max(1, ...rows.map(r=>r.count));
+  return `<div class="panel" style="margin-bottom:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Player Availability</h3>
+    <p class="hint" style="margin-bottom:12px;">How many players prefer each day, from their profiles — use this to help decide when to book ice.</p>
+    ${rows.map(r=>`
+      <div style="margin-bottom:10px;">
+        <div class="row-flex" style="margin-bottom:2px;">
+          <strong>${r.day}</strong><span class="hint">${r.count} player${r.count===1?'':'s'}</span>
+        </div>
+        <div class="spots-bar"><div class="spots-fill" style="width:${Math.round(r.count/maxCount*100)}%"></div></div>
+        ${r.times.length ? `<div class="hint" style="margin-top:4px;">Times mentioned: ${r.times.join(', ')}</div>` : ''}
+      </div>`).join('')}
+  </div>`;
+}
 function renderRoster(){
   return `
   <h2 class="section-title">Roster</h2>
   <p class="section-sub">${roster.length} players. Sign-in is First Last name + password (no email) — names must be unique.</p>
+  ${availabilitySummaryHTML()}
   <div class="panel grid cols-2" style="margin-bottom:16px;">
     <div>
       <div class="field"><label>Add Player (First Last)</label><input id="newPlayerName" placeholder="e.g. Sam Whitfield"></div>
@@ -863,11 +928,12 @@ function renderRoster(){
   </div>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Rank</th><th>Positions</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Rank</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${roster.map(p=>`<tr>
       <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}</td>
       <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
       <td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td>
+      <td>${availabilitySummary(p)}</td>
       <td>
         <button class="btn ghost small" onclick="promoteToggle('${p.id}', ${!p.is_commissioner})">${p.is_commissioner?'Remove Commissioner':'Make Commissioner'}</button>
         <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">${p.claimed?'Reset Password':'Set Password'}</button>
