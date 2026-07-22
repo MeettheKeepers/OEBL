@@ -581,7 +581,7 @@ async function postAnnouncement(){
   showToast('Posted ✓ — sending notifications…');
   await loadAnnouncements();
   render();
-  const result = await callAdmin('send-push', { message, title: `${leagueName()} Announcement` });
+  const result = await callAdmin('send-push', { message, title: 'OBL Hockey Message' });
   if(result.error){ showToast('Posted, but push failed: '+result.error); }
   else { showToast(`Notified ${result.sent} device(s) ✓`); }
 }
