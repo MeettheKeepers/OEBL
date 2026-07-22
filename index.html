@@ -270,6 +270,7 @@ async function callAdmin(action, extra){
 
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const VAPID_PUBLIC_KEY = 'BCS0TEMcUCiKgZgQAJFW7uuzsbubtWXu71tY_KYoMpqOg5_ipzy5212S9wye4GVr5XBNWuO7wJfvpWrhXCYWEHE';
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
 const TEAMS = [['A','Team Light'], ['B','Team Dark']];
 const LEAGUES = [
@@ -297,6 +298,9 @@ let lines = [];         // game_lines rows for activeGameId (both teams)
 let merch = [];
 let allStats = [];      // game_stats rows (all games, filtered client-side to activeLeague's ice times)
 let activeStatsGameId = null; // id of the ice_time currently selected in Set Stats
+let announcements = []; // announcements rows for activeLeague
+let pushStatus = 'unknown'; // 'unsupported' | 'denied' | 'not-subscribed' | 'subscribed'
+let swRegistration = null;
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
@@ -357,7 +361,73 @@ async function enterApp(sess){
   renderLeagueTabs();
   await loadRoster();
   await loadLeagueData();
+  await initPush();
   setRole('player');
+}
+
+/* ================= PUSH NOTIFICATIONS ================= */
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for(let i=0;i<rawData.length;i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+async function initPush(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    pushStatus = 'unsupported';
+    return;
+  }
+  try{
+    swRegistration = await navigator.serviceWorker.register('./sw.js');
+    if(Notification.permission === 'denied'){ pushStatus = 'denied'; return; }
+    const sub = await swRegistration.pushManager.getSubscription();
+    pushStatus = sub ? 'subscribed' : 'not-subscribed';
+  }catch(e){
+    pushStatus = 'unsupported';
+  }
+}
+async function enablePush(){
+  if(pushStatus === 'unsupported'){ showToast('Push notifications are not supported on this device/browser.'); return; }
+  try{
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ pushStatus = 'denied'; render(); showToast('Notification permission was not granted.'); return; }
+    if(!swRegistration) swRegistration = await navigator.serviceWorker.register('./sw.js');
+    const sub = await swRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    const subJson = sub.toJSON();
+    const { error } = await sb.from('push_subscriptions').upsert({
+      user_id: me.id,
+      endpoint: subJson.endpoint,
+      p256dh: subJson.keys.p256dh,
+      auth: subJson.keys.auth,
+    }, { onConflict:'endpoint' });
+    if(error){ showToast('Failed to save subscription: '+error.message); return; }
+    pushStatus = 'subscribed';
+    render();
+    showToast('Notifications enabled ✓');
+  }catch(e){
+    showToast('Failed to enable notifications: '+e.message);
+  }
+}
+async function disablePush(){
+  try{
+    if(swRegistration){
+      const sub = await swRegistration.pushManager.getSubscription();
+      if(sub){
+        await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+        await sub.unsubscribe();
+      }
+    }
+    pushStatus = 'not-subscribed';
+    render();
+    showToast('Notifications disabled');
+  }catch(e){
+    showToast('Failed: '+e.message);
+  }
 }
 
 /* ================= LEAGUES ================= */
@@ -377,7 +447,11 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements()]);
+}
+async function loadAnnouncements(){
+  const { data } = await sb.from('announcements').select('*').eq('league_id', activeLeague).order('created_at', { ascending:false });
+  announcements = data || [];
 }
 
 async function signOut(){
@@ -391,6 +465,7 @@ async function signOut(){
 /* ================= ROLE / TABS ================= */
 const PLAYER_TABS = [
   {id:'dashboard', label:'Dashboard'},
+  {id:'announcements', label:'Announcements'},
   {id:'profile', label:'Profile'},
   {id:'icetimes', label:'Ice Times'},
   {id:'lines', label:'Lines'},
@@ -398,6 +473,7 @@ const PLAYER_TABS = [
   {id:'merch', label:'Merch'},
 ];
 const ADMIN_TABS = [
+  {id:'announcements', label:'Announcements'},
   {id:'postice', label:'Post Ice Time'},
   {id:'setlines', label:'Set Lines'},
   {id:'setstats', label:'Set Stats'},
@@ -461,6 +537,7 @@ async function loadLines(gameId){
 function render(){
   const main = document.getElementById('main');
   if(activeTab==='dashboard') main.innerHTML = renderDashboard();
+  else if(activeTab==='announcements') main.innerHTML = renderAnnouncements();
   else if(activeTab==='profile') main.innerHTML = renderProfile();
   else if(activeTab==='icetimes') main.innerHTML = renderIceTimes();
   else if(activeTab==='lines') main.innerHTML = renderLinesView();
@@ -470,6 +547,51 @@ function render(){
   else if(activeTab==='setlines') main.innerHTML = renderSetLines();
   else if(activeTab==='setstats') main.innerHTML = renderSetStats();
   else if(activeTab==='roster') main.innerHTML = renderRoster();
+}
+
+/* ---------- ANNOUNCEMENTS ---------- */
+function renderAnnouncements(){
+  const compose = me.is_commissioner ? `
+    <div class="panel" style="margin-bottom:16px;">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Post an Announcement</h3>
+      <div class="field"><label>Message</label><textarea id="announceMsg" rows="3" placeholder="e.g. Reminder: game Tuesday 7pm at Rockland — see you there!"></textarea></div>
+      <button class="btn purple" onclick="postAnnouncement()">Post &amp; Notify Everyone</button>
+      <div class="hint">Also sends a push notification to anyone who's enabled notifications. Messages auto-clear after 2 weeks.</div>
+    </div>` : '';
+  const list = announcements.length ? announcements.map(a=>`
+    <div class="panel" style="margin-bottom:10px;">
+      <div class="row-flex" style="margin-bottom:4px;">
+        <strong>${a.author_name}</strong>
+        <span class="hint">${new Date(a.created_at).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</span>
+      </div>
+      <div>${(a.message||'').replace(/</g,'&lt;')}</div>
+      ${me.is_commissioner ? `<button class="btn ghost small" style="margin-top:8px;" onclick="deleteAnnouncement('${a.id}')">Delete</button>` : ''}
+    </div>`).join('') : '<div class="empty">No announcements yet.</div>';
+  return `
+  <h2 class="section-title">Announcements — ${activeLeague}</h2>
+  <p class="section-sub">Updates and reminders from the commissioner for ${leagueName()}.</p>
+  ${compose}
+  ${list}`;
+}
+async function postAnnouncement(){
+  const message = document.getElementById('announceMsg').value.trim();
+  if(!message){ showToast('Enter a message first'); return; }
+  const { error } = await sb.from('announcements').insert({ league_id:activeLeague, author_id:me.id, author_name:me.name, message });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Posted ✓ — sending notifications…');
+  await loadAnnouncements();
+  render();
+  const result = await callAdmin('send-push', { message, title: `${leagueName()} Announcement` });
+  if(result.error){ showToast('Posted, but push failed: '+result.error); }
+  else { showToast(`Notified ${result.sent} device(s) ✓`); }
+}
+async function deleteAnnouncement(id){
+  if(!confirm('Delete this announcement?')) return;
+  const { error } = await sb.from('announcements').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadAnnouncements();
+  render();
+  showToast('Deleted ✓');
 }
 
 /* ---------- DASHBOARD ---------- */
@@ -548,6 +670,18 @@ function renderProfile(){
         <input value="${me.availability[d]||''}" placeholder="e.g. 7:00–9:00 PM" oninput="updateDayTime('${d}', this.value)">
       </div>`).join('')}
     <button class="btn purple" style="margin-top:14px" onclick="saveProfile()">Save Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Notifications</h3>
+    <p class="hint" style="margin-bottom:10px;">Get a push notification on this device when the commissioner posts an announcement or reminder.</p>
+    ${pushStatus==='subscribed'
+      ? `<div class="hint" style="margin-bottom:10px;color:var(--good);">✓ Notifications enabled on this device</div><button class="btn ghost small" onclick="disablePush()">Turn Off</button>`
+      : pushStatus==='denied'
+      ? `<div class="hint">Notifications are blocked for this site in your browser/phone settings. Enable them there, then reload this page.</div>`
+      : pushStatus==='unsupported'
+      ? `<div class="hint">Push notifications aren't supported in this browser. On iPhone: Share → Add to Home Screen, then open the app from your Home Screen and try again.</div>`
+      : `<button class="btn purple" onclick="enablePush()">Enable Notifications</button>`
+    }
   </div>`;
 }
 function togglePos(p){
