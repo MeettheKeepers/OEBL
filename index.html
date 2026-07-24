@@ -270,6 +270,11 @@ async function callAdmin(action, extra){
 
 const POSITIONS = ['LW','C','RW','LD','RD','G'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const INJURY = {
+  green:  { label:'Green — Healthy', color:'#4fd18a' },
+  yellow: { label:'Yellow — Tweaked something, can play if needed', color:'#e0c34f' },
+  red:    { label:"Red — Can't play", color:'#e05a5a' },
+};
 const VAPID_PUBLIC_KEY = 'BCS0TEMcUCiKgZgQAJFW7uuzsbubtWXu71tY_KYoMpqOg5_ipzy5212S9wye4GVr5XBNWuO7wJfvpWrhXCYWEHE';
 const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
 const TEAMS = [['A','Team Light'], ['B','Team Dark']];
@@ -301,6 +306,8 @@ let activeStatsGameId = null; // id of the ice_time currently selected in Set St
 let announcements = []; // announcements rows for activeLeague
 let pushStatus = 'unknown'; // 'unsupported' | 'denied' | 'not-subscribed' | 'subscribed'
 let swRegistration = null;
+let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age'
+let rosterView = 'active'; // 'active' | 'archived'
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
@@ -354,6 +361,7 @@ async function enterApp(sess){
   if(error || !profile){ setMsg('Signed in, but no profile found yet — try again in a moment.', true); return; }
   me = profile;
   me.availability = me.availability || {};
+  me.injury_status = me.injury_status || 'green';
   document.getElementById('signin').style.display='none';
   document.getElementById('app').style.display='block';
   document.getElementById('userName').textContent = me.name || me.email;
@@ -643,6 +651,7 @@ function renderProfile(){
     <div>
       <div class="field"><label>Name</label><input id="pName" value="${me.name||''}"></div>
       <div class="field"><label>Email</label><input value="${me.email||''}" disabled></div>
+      <div class="field"><label>Birthdate</label><input id="pBirthdate" type="date" value="${me.birthdate||''}"></div>
       <div class="field">
         <label>Positions (select all that apply)</label>
         <div class="chips" id="posChips">
@@ -669,6 +678,28 @@ function renderProfile(){
         <label>Preferred time — ${d}</label>
         <input value="${me.availability[d]||''}" placeholder="e.g. 7:00–9:00 PM" oninput="updateDayTime('${d}', this.value)">
       </div>`).join('')}
+    <button class="btn purple" style="margin-top:14px" onclick="saveProfile()">Save Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Injury Status</h3>
+    <p class="hint" style="margin-bottom:10px;">Let the commissioner know if you're able to play.</p>
+    <div class="field" style="max-width:340px;">
+      <select id="injurySelect" style="border-left:6px solid ${INJURY[me.injury_status||'green'].color};" onchange="updateInjury(this.value)">
+        ${Object.entries(INJURY).map(([k,v])=>`<option value="${k}" ${(me.injury_status||'green')===k?'selected':''}>${v.label}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Vacation Mode</h3>
+    <p class="hint" style="margin-bottom:10px;">Let the commissioner know you're unavailable for a stretch of time.</p>
+    <div class="chips">
+      <div class="chip ${(me.vacation_start||me.vacation_end)?'on':''}" onclick="toggleVacation()">On Vacation</div>
+    </div>
+    ${(me.vacation_start||me.vacation_end) ? `
+    <div class="grid cols-2" style="margin-top:12px;">
+      <div class="field"><label>Start Date</label><input type="date" value="${me.vacation_start||''}" onchange="updateVacationStart(this.value)"></div>
+      <div class="field"><label>End Date</label><input type="date" value="${me.vacation_end||''}" onchange="updateVacationEnd(this.value)"></div>
+    </div>` : ''}
     <button class="btn purple" style="margin-top:14px" onclick="saveProfile()">Save Profile</button>
   </div>
   <div class="panel" style="margin-top:16px;">
@@ -705,9 +736,35 @@ function updateRank(v){
   me.rank = Number(v);
   document.getElementById('rankNum').textContent = v;
 }
+async function updateInjury(v){
+  me.injury_status = v;
+  const { error } = await sb.from('profiles').update({ injury_status: v }).eq('id', me.id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  render();
+  showToast('Injury status updated ✓');
+}
+function toggleVacation(){
+  if(me.vacation_start || me.vacation_end){
+    me.vacation_start = null;
+    me.vacation_end = null;
+  } else {
+    const todayStr = new Date().toISOString().slice(0,10);
+    me.vacation_start = todayStr;
+    me.vacation_end = todayStr;
+  }
+  render();
+}
+function updateVacationStart(v){ me.vacation_start = v || null; }
+function updateVacationEnd(v){ me.vacation_end = v || null; }
 async function saveProfile(){
   me.name = document.getElementById('pName').value || me.name;
-  const { error } = await sb.from('profiles').update({ name: me.name, rank: me.rank, positions: me.positions, availability: me.availability }).eq('id', me.id);
+  const birthdateEl = document.getElementById('pBirthdate');
+  if(birthdateEl) me.birthdate = birthdateEl.value || null;
+  const { error } = await sb.from('profiles').update({
+    name: me.name, rank: me.rank, positions: me.positions, availability: me.availability,
+    birthdate: me.birthdate, vacation_start: me.vacation_start, vacation_end: me.vacation_end,
+  }).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
   document.getElementById('userName').textContent = me.name;
   await loadRoster();
@@ -796,7 +853,7 @@ function linesScreen(editable){
       const pid = lineup(slotKey);
       const p = pid ? playerById(pid) : null;
       if(editable){
-        const options = roster.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
+        const options = activeRoster().map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
         return `<div class="slot"><div class="pos-lbl">${label}</div>
           <select onchange="setLineSlot('${teamKey}','${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
       }
@@ -980,7 +1037,7 @@ function renderSetStats(){
   const game = iceTimes.find(g=>g.id===activeStatsGameId) || iceTimes[0];
   const opts = iceTimes.map(g=>`<option value="${g.id}" ${g.id===game.id?'selected':''}>${iceTimeLabel(g)}</option>`).join('');
   const statFor = (pid)=> allStats.find(s=>s.game_id===game.id && s.player_id===pid) || { goals:0, assists:0 };
-  const rows = roster.map(p=>{
+  const rows = activeRoster().map(p=>{
     const s = statFor(p.id);
     return `<tr>
       <td>${p.name}</td>
@@ -1032,6 +1089,39 @@ function availabilityAggregate(){
   });
   return DAYS.map(d=>({ day:d, count:counts[d], times:times[d] }));
 }
+function activeRoster(){ return roster.filter(p=>!p.archived_at); }
+function gamesPlayed(p){ return signups.filter(s=>s.user_id===p.id).length; }
+function calcAge(birthdate){
+  if(!birthdate) return null;
+  const b = new Date(birthdate+'T00:00:00');
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if(m < 0 || (m===0 && now.getDate() < b.getDate())) age--;
+  return age;
+}
+function daysUntilArchive(p){
+  if(!p.inactive_flagged_at) return null;
+  const flagged = new Date(p.inactive_flagged_at);
+  const deadline = new Date(flagged.getTime() + 30*24*60*60*1000);
+  const now = new Date();
+  return Math.max(0, Math.ceil((deadline-now)/(24*60*60*1000)));
+}
+function sortedRoster(list){
+  const arr = [...list];
+  if(rosterSort==='rank') arr.sort((a,b)=> b.rank-a.rank);
+  else if(rosterSort==='games') arr.sort((a,b)=> gamesPlayed(b)-gamesPlayed(a));
+  else if(rosterSort==='age'){
+    arr.sort((a,b)=>{
+      const ageA = calcAge(a.birthdate), ageB = calcAge(b.birthdate);
+      if(ageA===null && ageB===null) return 0;
+      if(ageA===null) return 1;
+      if(ageB===null) return -1;
+      return ageB-ageA;
+    });
+  } else arr.sort((a,b)=> a.name.localeCompare(b.name));
+  return arr;
+}
 function availabilitySummaryHTML(){
   const rows = availabilityAggregate();
   const maxCount = Math.max(1, ...rows.map(r=>r.count));
@@ -1049,9 +1139,12 @@ function availabilitySummaryHTML(){
   </div>`;
 }
 function renderRoster(){
+  const activePlayers = sortedRoster(activeRoster());
+  const archivedPlayers = sortedRoster(roster.filter(p=>p.archived_at));
+  const showList = rosterView==='archived' ? archivedPlayers : activePlayers;
   return `
   <h2 class="section-title">Roster</h2>
-  <p class="section-sub">${roster.length} players. Sign-in is First Last name + password (no email) — names must be unique.</p>
+  <p class="section-sub">${activePlayers.length} active player${activePlayers.length===1?'':'s'}${archivedPlayers.length?` · ${archivedPlayers.length} archived`:''}. Sign-in is First Last name + password (no email) — names must be unique.</p>
   ${availabilitySummaryHTML()}
   <div class="panel grid cols-2" style="margin-bottom:16px;">
     <div>
@@ -1060,20 +1153,51 @@ function renderRoster(){
       <div class="hint">Adds a pending spot. The player then goes to "Create account" on the sign-in screen and enters this exact name plus a password of their choice to activate it and fill out their own profile.</div>
     </div>
   </div>
+  <div class="row-flex" style="margin-bottom:12px;">
+    <div style="display:flex;gap:8px;">
+      <button class="btn ghost small ${rosterView==='active'?'active':''}" style="${rosterView==='active'?'background:var(--panel2);color:var(--teal);':''}" onclick="rosterView='active';render()">Active (${activePlayers.length})</button>
+      <button class="btn ghost small ${rosterView==='archived'?'active':''}" style="${rosterView==='archived'?'background:var(--panel2);color:var(--teal);':''}" onclick="rosterView='archived';render()">Archived (${archivedPlayers.length})</button>
+    </div>
+    <div class="field" style="max-width:220px;margin:0;">
+      <select onchange="rosterSort=this.value;render()">
+        <option value="name" ${rosterSort==='name'?'selected':''}>Sort: Name</option>
+        <option value="rank" ${rosterSort==='rank'?'selected':''}>Sort: Rank</option>
+        <option value="games" ${rosterSort==='games'?'selected':''}>Sort: Games Played</option>
+        <option value="age" ${rosterSort==='age'?'selected':''}>Sort: Age</option>
+      </select>
+    </div>
+  </div>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Rank</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
-    ${roster.map(p=>`<tr>
-      <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}</td>
-      <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
-      <td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td>
-      <td>${availabilitySummary(p)}</td>
-      <td>
-        <button class="btn ghost small" onclick="promoteToggle('${p.id}', ${!p.is_commissioner})">${p.is_commissioner?'Remove Commissioner':'Make Commissioner'}</button>
-        <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">${p.claimed?'Reset Password':'Set Password'}</button>
-        <button class="btn ghost small" onclick="deletePlayer('${p.id}','${p.name.replace(/'/g,"\\'")}')">Delete</button>
-      </td>
-    </tr>`).join('')}
+    <tr><th>Name</th><th>Rank</th><th>Age</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    ${showList.length ? showList.map(p=>{
+      const inj = INJURY[p.injury_status||'green'];
+      const age = calcAge(p.birthdate);
+      const onVacation = !!(p.vacation_start || p.vacation_end);
+      const daysLeft = daysUntilArchive(p);
+      return `<tr>
+        <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}</td>
+        <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
+        <td>${age!==null?age:'—'}</td>
+        <td>${gamesPlayed(p)}</td>
+        <td><span class="tag" style="background:${inj.color};color:#04241a;">${(p.injury_status||'green').toUpperCase()}</span></td>
+        <td>${onVacation ? `<span class="hint">${p.vacation_start||'?'} → ${p.vacation_end||'?'}</span>` : '<span class="hint">—</span>'}</td>
+        <td>${(p.positions||[]).map(x=>`<span class="tag pos">${x}</span>`).join('')}</td>
+        <td>${availabilitySummary(p)}</td>
+        <td>
+          ${rosterView==='archived'
+            ? `<button class="btn ghost small" onclick="reactivatePlayer('${p.id}')">Reactivate</button>`
+            : `
+            <button class="btn ghost small" onclick="promoteToggle('${p.id}', ${!p.is_commissioner})">${p.is_commissioner?'Remove Commissioner':'Make Commissioner'}</button>
+            <button class="btn ghost small" onclick="resetPassword('${p.id}','${p.name.replace(/'/g,"\\'")}')">${p.claimed?'Reset Password':'Set Password'}</button>
+            ${p.inactive_flagged_at
+              ? `<button class="btn ghost small" onclick="cancelInactiveFlag('${p.id}')">Cancel Inactive (${daysLeft}d left)</button>`
+              : `<button class="btn ghost small" onclick="flagInactive('${p.id}','${p.name.replace(/'/g,"\\'")}')">Flag Inactive</button>`}
+            <button class="btn ghost small" onclick="deletePlayer('${p.id}','${p.name.replace(/'/g,"\\'")}')">Delete</button>
+          `}
+        </td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="9" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
   </div>`;
 }
@@ -1105,6 +1229,28 @@ async function resetPassword(id, name){
   const result = await callAdmin('reset-password', { target_user_id:id, new_password:pw });
   if(result.error){ showToast('Failed: '+result.error); return; }
   showToast('Password updated ✓');
+}
+async function flagInactive(id, name){
+  if(!confirm(`Flag ${name} as inactive? If not cancelled, they'll be auto-archived in 30 days.`)) return;
+  const { error } = await sb.from('profiles').update({ inactive_flagged_at: new Date().toISOString() }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  render();
+  showToast('Player flagged inactive — auto-archives in 30 days unless cancelled');
+}
+async function cancelInactiveFlag(id){
+  const { error } = await sb.from('profiles').update({ inactive_flagged_at: null }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  render();
+  showToast('Inactive flag cancelled ✓');
+}
+async function reactivatePlayer(id){
+  const { error } = await sb.from('profiles').update({ archived_at: null, inactive_flagged_at: null }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  render();
+  showToast('Player reactivated ✓');
 }
 async function deletePlayer(id, name){
   if(id===me.id){ showToast("You can't delete your own account."); return; }
