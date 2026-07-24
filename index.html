@@ -29,6 +29,7 @@
     --muted:#93a1b0;
     --danger:#e05a5a;
     --good:#4fd18a;
+    --header-bg:rgba(10,13,18,.92);
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
@@ -91,16 +92,27 @@
   .demo-note{margin-top:22px;font-size:11px;color:var(--muted);text-align:center;max-width:340px;}
 
   /* ---------- APP SHELL ---------- */
-  #app{display:none;min-height:100vh;}
+  /* Main app uses a white/light theme with the same teal/purple/black accents;
+     sign-in keeps the original dark theme (these vars only override inside #app). */
+  #app{
+    display:none;min-height:100vh;
+    --bg:#ffffff;
+    --panel:#ffffff;
+    --panel2:#f4f6f8;
+    --line:#e3e7ec;
+    --text:#12161c;
+    --muted:#5b6672;
+    --header-bg:rgba(255,255,255,.92);
+  }
   header.top{
     position:sticky;top:0;z-index:20;
-    background:rgba(10,13,18,.92);backdrop-filter:blur(8px);
+    background:var(--header-bg);backdrop-filter:blur(8px);
     border-bottom:1px solid var(--line);
     display:flex;align-items:center;gap:18px;padding:12px 24px;flex-wrap:wrap;
   }
   .mini-badge{width:42px;height:42px;border-radius:50%;background:linear-gradient(180deg,var(--teal-dim),var(--bg) 70%);border:2px solid var(--teal);flex:none;}
   .titlebox{line-height:1.05;}
-  .titlebox .t1{font-size:16px;color:#fff;}
+  .titlebox .t1{font-size:16px;color:var(--text);}
   .titlebox .t2{font-size:12px;color:var(--purple);letter-spacing:2px;}
   nav.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap;}
   nav.tabs button{
@@ -132,7 +144,7 @@
   nav.league-tabs button.active .lg-code{color:var(--teal);}
 
   main{max-width:1080px;margin:0 auto;padding:28px 24px 80px;}
-  .section-title{font-size:22px;color:#fff;margin:0 0 4px;}
+  .section-title{font-size:22px;color:var(--text);margin:0 0 4px;}
   .section-sub{color:var(--muted);font-size:13px;margin:0 0 22px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:20px;}
   .grid{display:grid;gap:16px;}
@@ -168,8 +180,8 @@
   .spots-bar{width:120px;height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px;}
   .spots-fill{height:100%;background:linear-gradient(90deg,var(--teal-dim),var(--teal));}
   .tag{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:700;margin-left:6px;}
-  .tag.pos{background:rgba(138,79,214,.18);color:var(--purple);}
-  .tag.rank{background:rgba(79,209,217,.15);color:var(--teal);}
+  .tag.pos{background:rgba(138,79,214,.22);color:var(--purple-dim);}
+  .tag.rank{background:rgba(79,209,217,.25);color:var(--teal-dim);}
 
   /* lines */
   .line-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
