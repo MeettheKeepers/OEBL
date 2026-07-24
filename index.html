@@ -276,7 +276,7 @@ const INJURY = {
   red:    { label:"Red — Can't play", color:'#e05a5a' },
 };
 const VAPID_PUBLIC_KEY = 'BCS0TEMcUCiKgZgQAJFW7uuzsbubtWXu71tY_KYoMpqOg5_ipzy5212S9wye4GVr5XBNWuO7wJfvpWrhXCYWEHE';
-const LOCATIONS = ['Rockland','Orléans','Richcraft Sensplex'];
+// Arenas are now commissioner-managed per league (see `arenas` table / loadArenas()).
 const TEAMS = [['A','Team Light'], ['B','Team Dark']];
 const LEAGUES = [
   ['OEBL','Ottawa East Beer League'],
@@ -308,6 +308,7 @@ let pushStatus = 'unknown'; // 'unsupported' | 'denied' | 'not-subscribed' | 'su
 let swRegistration = null;
 let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age'
 let rosterView = 'active'; // 'active' | 'archived'
+let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
@@ -362,6 +363,7 @@ async function enterApp(sess){
   me = profile;
   me.availability = me.availability || {};
   me.injury_status = me.injury_status || 'green';
+  me.preferred_arenas = me.preferred_arenas || {};
   document.getElementById('signin').style.display='none';
   document.getElementById('app').style.display='block';
   document.getElementById('userName').textContent = me.name || me.email;
@@ -455,7 +457,11 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas()]);
+}
+async function loadArenas(){
+  const { data } = await sb.from('arenas').select('*').eq('league_id', activeLeague).order('name');
+  arenas = data || [];
 }
 async function loadAnnouncements(){
   const { data } = await sb.from('announcements').select('*').eq('league_id', activeLeague).order('created_at', { ascending:false });
@@ -703,6 +709,17 @@ function renderProfile(){
     <button class="btn purple" style="margin-top:14px" onclick="saveProfile()">Save Profile</button>
   </div>
   <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas — ${activeLeague}</h3>
+    <p class="hint" style="margin-bottom:10px;">Click arenas in the order you prefer them (up to 5). Your #1 pick is ranked first.</p>
+    <div class="chips">
+      ${arenas.length ? arenas.map(a=>{
+        const rank = arenaPrefList().indexOf(a.id);
+        return `<div class="chip ${rank>-1?'on':''}" onclick="toggleArenaPref('${a.id}')">${rank>-1?'#'+(rank+1)+' ':''}${a.name}</div>`;
+      }).join('') : '<span class="hint">No arenas set up yet for this league.</span>'}
+    </div>
+    <button class="btn purple" style="margin-top:14px" onclick="saveProfile()">Save Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
     <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Notifications</h3>
     <p class="hint" style="margin-bottom:10px;">Get a push notification on this device when the commissioner posts an announcement or reminder.</p>
     ${pushStatus==='subscribed'
@@ -757,6 +774,20 @@ function toggleVacation(){
 }
 function updateVacationStart(v){ me.vacation_start = v || null; }
 function updateVacationEnd(v){ me.vacation_end = v || null; }
+function arenaPrefList(){ return (me.preferred_arenas && me.preferred_arenas[activeLeague]) || []; }
+function toggleArenaPref(id){
+  const cur = { ...(me.preferred_arenas||{}) };
+  const list = [...(cur[activeLeague]||[])];
+  const idx = list.indexOf(id);
+  if(idx>-1) list.splice(idx,1);
+  else {
+    if(list.length>=5){ showToast('You can rank up to 5 arenas'); return; }
+    list.push(id);
+  }
+  cur[activeLeague] = list;
+  me.preferred_arenas = cur;
+  render();
+}
 async function saveProfile(){
   me.name = document.getElementById('pName').value || me.name;
   const birthdateEl = document.getElementById('pBirthdate');
@@ -764,6 +795,7 @@ async function saveProfile(){
   const { error } = await sb.from('profiles').update({
     name: me.name, rank: me.rank, positions: me.positions, availability: me.availability,
     birthdate: me.birthdate, vacation_start: me.vacation_start, vacation_end: me.vacation_end,
+    preferred_arenas: me.preferred_arenas,
   }).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
   document.getElementById('userName').textContent = me.name;
@@ -966,14 +998,78 @@ function renderMerch(){
 function addToCart(id){ cart.push(id); showToast('Added to cart'); render(); }
 
 /* ---------- ADMIN: POST ICE TIME ---------- */
+function arenaAggregate(){
+  const counts = {}, firstCounts = {};
+  arenas.forEach(a=>{ counts[a.id]=0; firstCounts[a.id]=0; });
+  roster.forEach(p=>{
+    const list = (p.preferred_arenas && p.preferred_arenas[activeLeague]) || [];
+    list.forEach((id,idx)=>{
+      if(counts[id]!==undefined){ counts[id]++; if(idx===0) firstCounts[id]++; }
+    });
+  });
+  return arenas.map(a=>({ arena:a, count:counts[a.id]||0, firstCount:firstCounts[a.id]||0 }))
+    .sort((a,b)=> b.count-a.count);
+}
+function arenaAggregateHTML(){
+  const rows = arenaAggregate();
+  if(!rows.length) return '';
+  const maxCount = Math.max(1, ...rows.map(r=>r.count));
+  return `<div class="panel" style="margin-bottom:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Arena Preferences</h3>
+    <p class="hint" style="margin-bottom:12px;">How players rank each arena — use this to help decide where to book.</p>
+    ${rows.map(r=>`
+      <div style="margin-bottom:10px;">
+        <div class="row-flex" style="margin-bottom:2px;">
+          <strong>${r.arena.name}</strong><span class="hint">${r.count} player${r.count===1?'':'s'} · ${r.firstCount} #1 pick${r.firstCount===1?'':'s'}</span>
+        </div>
+        <div class="spots-bar"><div class="spots-fill" style="width:${Math.round(r.count/maxCount*100)}%"></div></div>
+      </div>`).join('')}
+  </div>`;
+}
+function manageArenasHTML(){
+  return `<div class="panel" style="margin-bottom:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Manage Arenas — ${activeLeague}</h3>
+    <p class="hint" style="margin-bottom:12px;">Arenas available for booking and for players to rank in their profile.</p>
+    <div class="chips" style="margin-bottom:14px;">
+      ${arenas.length ? arenas.map(a=>`<div class="chip on" style="display:flex;align-items:center;gap:8px;">${a.name}
+        <span style="cursor:pointer;color:var(--danger);font-weight:900;" onclick="removeArena('${a.id}','${a.name.replace(/'/g,"\\'")}')">×</span>
+      </div>`).join('') : '<span class="hint">No arenas yet — add one below.</span>'}
+    </div>
+    <div class="row-flex" style="max-width:420px;align-items:flex-end;gap:10px;">
+      <div class="field" style="flex:1;margin:0;"><label>New Arena Name</label><input id="newArenaName" placeholder="e.g. Bell Sensplex"></div>
+      <button class="btn purple small" onclick="addArena()">Add</button>
+    </div>
+  </div>`;
+}
+async function addArena(){
+  const el = document.getElementById('newArenaName');
+  const name = el.value.trim();
+  if(!name){ showToast('Enter an arena name first'); return; }
+  const { error } = await sb.from('arenas').insert({ league_id: activeLeague, name });
+  if(error){ showToast('Failed: '+error.message); return; }
+  el.value = '';
+  await loadArenas();
+  render();
+  showToast('Arena added ✓');
+}
+async function removeArena(id, name){
+  if(!confirm(`Remove arena "${name}"? It will no longer be selectable for booking or profile ranking.`)) return;
+  const { error } = await sb.from('arenas').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadArenas();
+  render();
+  showToast('Arena removed ✓');
+}
 function renderPostIce(){
   return `
   <h2 class="section-title">Post New Ice Time — ${activeLeague}</h2>
   <p class="section-sub">Open a new session for ${leagueName()} players to sign up for.</p>
   ${availabilitySummaryHTML()}
+  ${arenaAggregateHTML()}
+  ${manageArenasHTML()}
   <div class="panel grid cols-2">
     <div>
-      <div class="field"><label>Location</label><select id="newLoc">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
+      <div class="field"><label>Location</label><select id="newLoc">${arenas.map(a=>`<option>${a.name}</option>`).join('')}</select></div>
       <div class="field"><label>Date</label><input id="newDate" type="date"></div>
       <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM"></div>
       <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="18"></div>
