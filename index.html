@@ -261,7 +261,8 @@
     <nav class="tabs" id="tabs"></nav>
     <div class="role-toggle" id="roleToggle" style="display:none;">
       <button id="roleBtnPlayer" onclick="setRole('player')">Player</button>
-      <button id="roleBtnAdmin" onclick="setRole('admin')">Commissioner</button>
+      <button id="roleBtnReferee" onclick="setRole('referee')" style="display:none;">Referee</button>
+      <button id="roleBtnAdmin" onclick="setRole('admin')" style="display:none;">Commissioner</button>
     </div>
     <div class="user-chip"><span class="dot"></span><span id="userName"></span></div>
     <button class="btn ghost small" onclick="signOut()">Sign Out</button>
@@ -291,7 +292,7 @@ async function callAdmin(action, extra){
   return res.json();
 }
 
-const POSITIONS = ['LW','C','RW','LD','RD','G'];
+const POSITIONS = ['LW','C','RW','LD','RD','G','REF'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const INJURY = {
   green:  { label:'Green — Healthy', color:'#4fd18a' },
@@ -390,12 +391,15 @@ async function enterApp(sess){
   me.injury_status = me.injury_status || 'green';
   me.preferred_arenas = me.preferred_arenas || {};
   me.vacations = me.vacations || [];
+  me.referee_arenas = me.referee_arenas || {};
   document.getElementById('signin').style.display='none';
   document.getElementById('app').style.display='block';
   document.getElementById('userName').textContent = me.name || me.email;
-  document.getElementById('roleToggle').style.display = me.is_commissioner ? 'flex' : 'none';
   renderLeagueTabs();
   await loadRoster();
+  await loadRefPhones();
+  me.refereePhone = refPhones[me.id] || '';
+  updateRoleToggleVisibility();
   await loadLeagueData();
   await initPush();
   setRole('player');
@@ -512,6 +516,12 @@ const PLAYER_TABS = [
   {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
 ];
+const REFEREE_TABS = [
+  {id:'refdash', label:'Dashboard'},
+  {id:'refroster', label:'Referee Roster'},
+  {id:'profile', label:'Profile'},
+  {id:'announcements', label:'Announcements'},
+];
 const ADMIN_TABS = [
   {id:'announcements', label:'Announcements'},
   {id:'postice', label:'Post Ice Time'},
@@ -519,14 +529,26 @@ const ADMIN_TABS = [
   {id:'setstats', label:'Set Stats'},
   {id:'roster', label:'Roster'},
   {id:'message', label:'Message Players'},
+  {id:'refroster', label:'Referee Roster'},
   {id:'merch', label:'Merch'},
 ];
+function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
+function updateRoleToggleVisibility(){
+  const isRef = (me.positions||[]).includes('REF');
+  document.getElementById('roleToggle').style.display = (me.is_commissioner || isRef) ? 'flex' : 'none';
+  document.getElementById('roleBtnAdmin').style.display = me.is_commissioner ? '' : 'none';
+  document.getElementById('roleBtnReferee').style.display = isRef ? '' : 'none';
+  if(role==='referee' && !isRef) setRole('player');
+  if(role==='admin' && !me.is_commissioner) setRole('player');
+}
 function setRole(r){
   if(r==='admin' && !me.is_commissioner) return;
+  if(r==='referee' && !(me.positions||[]).includes('REF')) return;
   role = r;
   document.getElementById('roleBtnPlayer').classList.toggle('active', r==='player');
+  document.getElementById('roleBtnReferee').classList.toggle('active', r==='referee');
   document.getElementById('roleBtnAdmin').classList.toggle('active', r==='admin');
-  const tabs = r==='player' ? PLAYER_TABS : ADMIN_TABS;
+  const tabs = tabsForRole(r);
   activeTab = tabs[0].id;
   renderTabs(tabs);
   render();
@@ -537,7 +559,7 @@ function renderTabs(tabs){
 }
 function goTab(id){
   activeTab = id;
-  const tabs = role==='player' ? PLAYER_TABS : ADMIN_TABS;
+  const tabs = tabsForRole(role);
   [...document.querySelectorAll('#tabs button')].forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
   render();
 }
@@ -573,6 +595,13 @@ async function loadLines(gameId){
   const { data } = await sb.from('game_lines').select('*').eq('game_id', gameId);
   lines = data || [];
 }
+let refPhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
+async function loadRefPhones(){
+  const { data } = await sb.from('referee_phones').select('*');
+  refPhones = {};
+  (data||[]).forEach(r=>{ refPhones[r.user_id] = r.phone; });
+}
+function refPhoneFor(id){ return refPhones[id] || ''; }
 
 /* ================= RENDER ROUTER ================= */
 function render(){
@@ -589,6 +618,8 @@ function render(){
   else if(activeTab==='setstats') main.innerHTML = renderSetStats();
   else if(activeTab==='roster') main.innerHTML = renderRoster();
   else if(activeTab==='message') main.innerHTML = renderMessagePlayers();
+  else if(activeTab==='refdash') main.innerHTML = renderRefDashboard();
+  else if(activeTab==='refroster') main.innerHTML = renderRefRoster();
 }
 
 /* ---------- ANNOUNCEMENTS ---------- */
@@ -596,14 +627,18 @@ function renderAnnouncements(){
   const compose = me.is_commissioner ? `
     <div class="panel" style="margin-bottom:16px;">
       <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Post an Announcement</h3>
+      <div class="field" style="max-width:220px;"><label>Audience</label>
+        <select id="announceAudience"><option value="all">Everyone</option><option value="referees">Referees Only</option></select>
+      </div>
       <div class="field"><label>Message</label><textarea id="announceMsg" rows="3" placeholder="e.g. Reminder: game Tuesday 7pm at Rockland — see you there!"></textarea></div>
-      <button class="btn purple" onclick="postAnnouncement()">Post &amp; Notify Everyone</button>
+      <button class="btn purple" onclick="postAnnouncement()">Post &amp; Notify</button>
       <div class="hint">Also sends a push notification to anyone who's enabled notifications. Messages auto-clear after 2 weeks.</div>
     </div>` : '';
-  const list = announcements.length ? announcements.map(a=>`
+  const visible = announcements.filter(a=> a.audience!=='referees' || me.is_commissioner || (me.positions||[]).includes('REF'));
+  const list = visible.length ? visible.map(a=>`
     <div class="panel" style="margin-bottom:10px;">
       <div class="row-flex" style="margin-bottom:4px;">
-        <strong>${a.author_name}</strong>
+        <strong>${a.author_name}${a.audience==='referees'?' <span class="tag pos">Referees Only</span>':''}</strong>
         <span class="hint">${new Date(a.created_at).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</span>
       </div>
       <div>${(a.message||'').replace(/</g,'&lt;')}</div>
@@ -618,12 +653,16 @@ function renderAnnouncements(){
 async function postAnnouncement(){
   const message = document.getElementById('announceMsg').value.trim();
   if(!message){ showToast('Enter a message first'); return; }
-  const { error } = await sb.from('announcements').insert({ league_id:activeLeague, author_id:me.id, author_name:me.name, message });
+  const audienceEl = document.getElementById('announceAudience');
+  const audience = audienceEl ? audienceEl.value : 'all';
+  const { error } = await sb.from('announcements').insert({ league_id:activeLeague, author_id:me.id, author_name:me.name, message, audience });
   if(error){ showToast('Failed: '+error.message); return; }
   showToast('Posted ✓ — sending notifications…');
   await loadAnnouncements();
   render();
-  const result = await callAdmin('send-push', { message, title: 'OBL Hockey Message' });
+  const pushArgs = { message, title: 'OBL Hockey Message' };
+  if(audience==='referees') pushArgs.user_ids = refereeRoster().map(p=>p.id);
+  const result = await callAdmin('send-push', pushArgs);
   if(result.error){ showToast('Posted, but push failed: '+result.error); }
   else { showToast(`Notified ${result.sent} device(s) ✓`); }
 }
@@ -678,6 +717,10 @@ function renderDashboard(){
 
 /* ---------- PROFILE ---------- */
 function renderProfile(){
+  if(role==='referee') return renderRefereeProfile();
+  return renderPlayerProfile();
+}
+function renderPlayerProfile(){
   return `
   <h2 class="section-title">My Profile</h2>
   <p class="section-sub">Set your skill ranking and eligible positions — the commissioner uses this to build balanced lines.</p>
@@ -762,6 +805,7 @@ function renderProfile(){
 function togglePos(p){
   const i = me.positions.indexOf(p);
   if(i>-1) me.positions.splice(i,1); else me.positions.push(p);
+  updateRoleToggleVisibility();
   render();
 }
 function toggleDay(d){
@@ -831,6 +875,109 @@ async function saveProfile(){
   showToast('Profile saved ✓');
 }
 
+/* ---------- REFEREE PROFILE ---------- */
+function refereeArenaList(){ return (me.referee_arenas && me.referee_arenas[activeLeague]) || []; }
+function toggleRefArena(arenaId){
+  const cur = { ...(me.referee_arenas||{}) };
+  const list = [...(cur[activeLeague]||[])];
+  const idx = list.findIndex(x=>x.arena_id===arenaId);
+  if(idx>-1) list.splice(idx,1);
+  else {
+    if(list.length>=5){ showToast('You can rank up to 5 arenas'); return; }
+    list.push({ arena_id: arenaId, price_cents: 0 });
+  }
+  cur[activeLeague] = list;
+  me.referee_arenas = cur;
+  render();
+}
+function updateRefArenaPrice(arenaId, val){
+  const cur = { ...(me.referee_arenas||{}) };
+  const list = [...(cur[activeLeague]||[])];
+  const idx = list.findIndex(x=>x.arena_id===arenaId);
+  if(idx>-1) list[idx] = { ...list[idx], price_cents: Math.round(Number(val)*100) || 0 };
+  cur[activeLeague] = list;
+  me.referee_arenas = cur;
+}
+function updateRefSkill(v){
+  me.referee_skill = Number(v);
+  document.getElementById('refSkillNum').textContent = v;
+}
+function renderRefereeProfile(){
+  return `
+  <h2 class="section-title">Referee Profile</h2>
+  <p class="section-sub">Set your rates, rink preferences, and availability — commissioners use this to pick referees for games.</p>
+  <div class="panel grid cols-2">
+    <div style="text-align:center;">
+      <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Referee Skill Level</label>
+      <div class="rank-display" id="refSkillNum">${me.referee_skill}</div>
+      <div class="hint" style="margin-bottom:10px;">1 = brand new · 10 = could work playoffs</div>
+      <input type="range" min="1" max="10" value="${me.referee_skill}" oninput="updateRefSkill(this.value)">
+    </div>
+    <div>
+      <div class="field"><label>Hourly Rate ($)</label><input type="number" min="0" step="1" id="refHourly" value="${me.referee_hourly_cents!=null?(me.referee_hourly_cents/100).toFixed(0):''}" placeholder="e.g. 50"></div>
+      <div class="field"><label>Experience</label><textarea id="refExperience" rows="3" placeholder="e.g. 6 years reffing, Hockey Canada Level 2 certified">${me.referee_experience||''}</textarea></div>
+      <div class="field"><label>Phone Number</label><input id="refPhone" type="tel" value="${me.refereePhone||''}" placeholder="e.g. 613-555-0123"></div>
+      <div class="hint">Your phone number is only visible to commissioners — never shown to other referees.</div>
+    </div>
+    <button class="btn purple" style="margin-top:4px" onclick="saveRefereeProfile()">Save Referee Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas &amp; Rates — ${activeLeague}</h3>
+    <p class="hint" style="margin-bottom:10px;">Rank the arenas you're willing to ref at (up to 5) and set what you charge per game at each.</p>
+    <div class="chips" style="margin-bottom:14px;">
+      ${arenas.length ? arenas.map(a=>{
+        const idx = refereeArenaList().findIndex(x=>x.arena_id===a.id);
+        return `<div class="chip ${idx>-1?'on':''}" onclick="toggleRefArena('${a.id}')">${idx>-1?'#'+(idx+1)+' ':''}${a.name}</div>`;
+      }).join('') : '<span class="hint">No arenas set up yet for this league.</span>'}
+    </div>
+    ${refereeArenaList().map((item,idx)=>{
+      const arena = arenas.find(a=>a.id===item.arena_id);
+      return `<div class="row-flex" style="max-width:420px;margin-bottom:8px;">
+        <span>#${idx+1} ${arena?arena.name:'Unknown arena'}</span>
+        <div class="field" style="max-width:150px;margin:0;display:flex;align-items:center;gap:8px;"><input type="number" min="0" step="1" value="${(item.price_cents/100).toFixed(0)}" onchange="updateRefArenaPrice('${item.arena_id}', this.value)"><span class="hint">$/game</span></div>
+      </div>`;
+    }).join('')}
+    <button class="btn purple" style="margin-top:10px" onclick="saveRefereeProfile()">Save Referee Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Availability</h3>
+    <p class="hint" style="margin-bottom:10px;">Select the days you're usually available to ref.</p>
+    <div class="chips">
+      ${DAYS.map(d=>`<div class="chip ${me.availability[d]!==undefined?'on':''}" onclick="toggleDay('${d}')">${d}</div>`).join('')}
+    </div>
+    ${DAYS.filter(d=>me.availability[d]!==undefined).map(d=>`
+      <div class="field" style="max-width:320px;margin-top:12px;">
+        <label>Preferred time — ${d}</label>
+        <input value="${me.availability[d]||''}" placeholder="e.g. 7:00–9:00 PM" oninput="updateDayTime('${d}', this.value)">
+      </div>`).join('')}
+    <button class="btn purple" style="margin-top:14px" onclick="saveRefereeProfile()">Save Referee Profile</button>
+  </div>`;
+}
+async function saveRefereeProfile(){
+  const hourlyEl = document.getElementById('refHourly');
+  const experienceEl = document.getElementById('refExperience');
+  const phoneEl = document.getElementById('refPhone');
+  if(hourlyEl) me.referee_hourly_cents = hourlyEl.value !== '' ? Math.round(Number(hourlyEl.value)*100) : null;
+  if(experienceEl) me.referee_experience = experienceEl.value;
+  const phone = phoneEl ? phoneEl.value.trim() : (me.refereePhone||'');
+  const { error } = await sb.from('profiles').update({
+    referee_skill: me.referee_skill,
+    referee_hourly_cents: me.referee_hourly_cents,
+    referee_experience: me.referee_experience,
+    referee_arenas: me.referee_arenas,
+    availability: me.availability,
+  }).eq('id', me.id);
+  if(error){ showToast('Save failed: '+error.message); return; }
+  const { error: phoneErr } = await sb.from('referee_phones').upsert(
+    { user_id: me.id, phone, updated_at: new Date().toISOString() }, { onConflict:'user_id' }
+  );
+  if(phoneErr){ showToast('Saved, but phone number failed: '+phoneErr.message); return; }
+  me.refereePhone = phone;
+  refPhones[me.id] = phone;
+  await loadRoster();
+  showToast('Referee profile saved ✓');
+}
+
 /* ---------- ICE TIMES ---------- */
 function renderIceTimes(){
   return `
@@ -846,6 +993,7 @@ function renderIceTimes(){
         <div class="ice-loc">📍 ${s.location}</div>
         <div class="spots-bar"><div class="spots-fill" style="width:${pct}%"></div></div>
         <div class="hint">${claimedFor.length}/${s.max_spots} spots filled</div>
+        <div class="hint">${s.referee_id ? 'Referee: '+(playerById(s.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
       </div>
       <button class="btn ${inIt?'danger':'purple'} small" onclick="toggleIce('${s.id}')">${inIt?'Leave':'Claim Spot'}</button>
     </div>`;
@@ -865,6 +1013,70 @@ async function toggleIce(id){
   }
   await loadIceTimes();
   render();
+}
+
+/* ---------- REFEREE DASHBOARD + ROSTER ---------- */
+function refereeRoster(){ return roster.filter(p=>(p.positions||[]).includes('REF')); }
+function renderRefDashboard(){
+  return `
+  <h2 class="section-title">Referee Dashboard — ${activeLeague}</h2>
+  <p class="section-sub">Claim games you're available to referee for ${leagueName()}.</p>
+  ${iceTimes.length ? iceTimes.map(it=>{
+    const assignedTo = it.referee_id ? playerById(it.referee_id) : null;
+    const mine = it.referee_id === me.id;
+    return `<div class="ice-card">
+      <div>
+        <div class="ice-date">${iceTimeLabel(it)}</div>
+        <div class="ice-loc">${it.time_label}</div>
+        <div class="hint">${assignedTo ? `Referee: ${assignedTo.name}${mine?' (you)':''}` : 'No referee assigned yet'}</div>
+      </div>
+      ${mine
+        ? `<button class="btn danger small" onclick="releaseRefGame('${it.id}')">Release</button>`
+        : assignedTo
+        ? `<button class="btn ghost small" disabled>Taken</button>`
+        : `<button class="btn purple small" onclick="claimRefGame('${it.id}')">Claim</button>`}
+    </div>`;
+  }).join('') : '<div class="empty">No ice times posted yet.</div>'}
+  `;
+}
+async function claimRefGame(id){
+  const { error } = await sb.rpc('claim_referee', { p_ice_time_id: id });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Game claimed ✓');
+}
+async function releaseRefGame(id){
+  const { error } = await sb.rpc('release_referee', { p_ice_time_id: id });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Game released');
+}
+function renderRefRoster(){
+  const refs = refereeRoster();
+  const showPhone = me.is_commissioner;
+  return `
+  <h2 class="section-title">Referee Roster</h2>
+  <p class="section-sub">${refs.length} referee${refs.length===1?'':'s'} available${showPhone?'':' — phone numbers are only visible to commissioners'}.</p>
+  <div class="grid cols-3">
+  ${refs.length ? refs.map(p=>{
+    const arenaList = (p.referee_arenas && p.referee_arenas[activeLeague]) || [];
+    const hourly = p.referee_hourly_cents!=null ? '$'+(p.referee_hourly_cents/100).toFixed(0)+'/hr' : 'No rate set';
+    const arenaText = arenaList.length ? arenaList.map((item,idx)=>{
+      const arena = arenas.find(a=>a.id===item.arena_id);
+      return `#${idx+1} ${arena?arena.name:'?'} ($${(item.price_cents/100).toFixed(0)})`;
+    }).join(', ') : 'No arena preferences set';
+    return `<div class="player-card">
+      <div class="pc-name">${p.name}</div>
+      <div class="pc-meta">Skill ${p.referee_skill||5}/10 · ${hourly}</div>
+      <div class="pc-meta" style="margin-top:6px;">${arenaText}</div>
+      <div class="pc-meta" style="margin-top:6px;">${(p.referee_experience||'').trim() || 'No experience listed'}</div>
+      <div class="pc-meta" style="margin-top:6px;">${availabilitySummary(p)}</div>
+      ${showPhone ? `<div class="pc-meta" style="margin-top:6px;">📞 ${refPhoneFor(p.id)||'Not provided'}</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="empty">No referees yet.</div>'}
+  </div>`;
 }
 
 /* ---------- LINES ---------- */
@@ -941,6 +1153,7 @@ function linesScreen(editable){
     <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
     ${editable ? `<button class="btn ghost small" onclick="deleteIceTime('${game.id}','${gameLabelEsc}')">Delete</button>` : ''}
   </div>
+  <div class="hint" style="margin-bottom:12px;">${game.referee_id ? 'Referee: '+(playerById(game.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
   <div class="grid cols-2" style="align-items:start;">
     ${teamColumn('A', game.team_a_name || 'Team Light', 'team_a_name')}
     ${teamColumn('B', game.team_b_name || 'Team Dark', 'team_b_name')}
@@ -1111,8 +1324,8 @@ function renderPostIce(){
     </div>
     <div>
       <h3 style="font-size:14px;color:var(--muted);margin-top:0;">Currently Posted</h3>
-      ${iceTimes.map(s=>{ const n = signups.filter(x=>x.ice_time_id===s.id).length; return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots})</span>
+      ${iceTimes.map(s=>{ const n = signups.filter(x=>x.ice_time_id===s.id).length; const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'unassigned'; return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName}</span>
         <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
       </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
