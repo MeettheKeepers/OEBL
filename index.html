@@ -299,6 +299,11 @@ const INJURY = {
   yellow: { label:'Yellow — Tweaked something, can play if needed', color:'#e0c34f' },
   red:    { label:"Red — Can't play", color:'#e05a5a' },
 };
+const REF_STATUS = {
+  none:   { label:'No Ref Needed', color:'#4fd18a' },
+  wanted: { label:'Ref Wanted', color:'#e0c34f' },
+  needed: { label:'Ref Needed', color:'#e05a5a' },
+};
 const VAPID_PUBLIC_KEY = 'BCS0TEMcUCiKgZgQAJFW7uuzsbubtWXu71tY_KYoMpqOg5_ipzy5212S9wye4GVr5XBNWuO7wJfvpWrhXCYWEHE';
 // Arenas are now commissioner-managed per league (see `arenas` table / loadArenas()).
 const TEAMS = [['A','Team Light'], ['B','Team Dark']];
@@ -1020,13 +1025,14 @@ function refereeRoster(){ return roster.filter(p=>(p.positions||[]).includes('RE
 function renderRefDashboard(){
   return `
   <h2 class="section-title">Referee Dashboard — ${activeLeague}</h2>
-  <p class="section-sub">Claim games you're available to referee for ${leagueName()}.</p>
+  <p class="section-sub">Claim games you're available to referee for ${leagueName()}. Colour shows how badly a ref is needed: green = not needed, yellow = wanted, red = needed.</p>
   ${iceTimes.length ? iceTimes.map(it=>{
     const assignedTo = it.referee_id ? playerById(it.referee_id) : null;
     const mine = it.referee_id === me.id;
-    return `<div class="ice-card">
+    const rs = REF_STATUS[it.ref_status||'none'];
+    return `<div class="ice-card" style="border-left:6px solid ${rs.color};">
       <div>
-        <div class="ice-date">${iceTimeLabel(it)}</div>
+        <div class="ice-date">${iceTimeLabel(it)} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span></div>
         <div class="ice-loc">${it.time_label}</div>
         <div class="hint">${assignedTo ? `Referee: ${assignedTo.name}${mine?' (you)':''}` : 'No referee assigned yet'}</div>
       </div>
@@ -1319,13 +1325,22 @@ function renderPostIce(){
           ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}">${f.label}</option>`).join('')}
         </select>
       </div>
+      <div class="field"><label>Referee Requirement</label>
+        <select id="newRefStatus" style="border-left:6px solid ${REF_STATUS.none.color};" onchange="this.style.borderLeft='6px solid '+REF_STATUS[this.value].color">
+          ${Object.entries(REF_STATUS).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+        </select>
+      </div>
       <button class="btn purple" onclick="postIce()">Post Ice Time</button>
       <div class="hint">This ice time will automatically be available in Set Lines — no separate step needed.</div>
     </div>
     <div>
       <h3 style="font-size:14px;color:var(--muted);margin-top:0;">Currently Posted</h3>
-      ${iceTimes.map(s=>{ const n = signups.filter(x=>x.ice_time_id===s.id).length; const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'unassigned'; return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName}</span>
+      ${iceTimes.map(s=>{
+        const n = signups.filter(x=>x.ice_time_id===s.id).length;
+        const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'unassigned';
+        const rs = REF_STATUS[s.ref_status||'none'];
+        return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span></span>
         <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
       </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
@@ -1345,9 +1360,10 @@ async function postIce(){
   const max_spots = Number(document.getElementById('newMax').value)||18;
   const formatKey = document.getElementById('newFormat').value;
   const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
+  const ref_status = document.getElementById('newRefStatus').value;
   const { error } = await sb.from('ice_times').insert({
     date_label, game_date, time_label, location, max_spots, league_id:activeLeague,
-    fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies,
+    fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status,
   });
   if(error){ showToast('Failed: '+error.message); return; }
   showToast('Ice time posted ✓ — ready in Set Lines');
