@@ -575,12 +575,14 @@ async function loadRoster(){
   roster = data || [];
 }
 async function loadIceTimes(){
-  const [{ data: its }, { data: sus }] = await Promise.all([
+  const [{ data: its }, { data: sus }, { data: wl }] = await Promise.all([
     sb.from('ice_times').select('*').eq('league_id', activeLeague).order('game_date'),
     sb.from('ice_time_signups').select('*'),
+    sb.from('referee_waitlist').select('*'),
   ]);
   iceTimes = its || [];
   signups = sus || [];
+  refWaitlist = wl || [];
   if(activeGameId && !iceTimes.find(g=>g.id===activeGameId)) activeGameId = null;
   if(iceTimes.length && !activeGameId) activeGameId = iceTimes[0].id;
   if(activeGameId) await loadLines(activeGameId);
@@ -600,6 +602,7 @@ async function loadLines(gameId){
   const { data } = await sb.from('game_lines').select('*').eq('game_id', gameId);
   lines = data || [];
 }
+let refWaitlist = []; // referee_waitlist rows (all — small table, filtered client-side)
 let refPhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
 async function loadRefPhones(){
   const { data } = await sb.from('referee_phones').select('*');
@@ -1022,6 +1025,7 @@ async function toggleIce(id){
 
 /* ---------- REFEREE DASHBOARD + ROSTER ---------- */
 function refereeRoster(){ return roster.filter(p=>(p.positions||[]).includes('REF')); }
+function waitlistFor(iceTimeId){ return refWaitlist.filter(w=>w.ice_time_id===iceTimeId); }
 function renderRefDashboard(){
   return `
   <h2 class="section-title">Referee Dashboard — ${activeLeague}</h2>
@@ -1030,17 +1034,28 @@ function renderRefDashboard(){
     const assignedTo = it.referee_id ? playerById(it.referee_id) : null;
     const mine = it.referee_id === me.id;
     const rs = REF_STATUS[it.ref_status||'none'];
+    const wl = waitlistFor(it.id);
+    const onWaitlist = wl.some(w=>w.user_id===me.id);
+    let actionHTML;
+    if(it.ref_status==='none'){
+      actionHTML = `<span class="hint">No ref needed</span>`;
+    } else if(mine){
+      actionHTML = `<button class="btn danger small" onclick="releaseRefGame('${it.id}')">Release</button>`;
+    } else if(assignedTo){
+      actionHTML = onWaitlist
+        ? `<button class="btn ghost small" onclick="leaveWaitlist('${it.id}')">Leave Waitlist</button>`
+        : `<button class="btn purple small" onclick="joinWaitlist('${it.id}')">Join Waitlist</button>`;
+    } else {
+      actionHTML = `<button class="btn purple small" onclick="claimRefGame('${it.id}')">Claim</button>`;
+    }
     return `<div class="ice-card" style="border-left:6px solid ${rs.color};">
       <div>
         <div class="ice-date">${iceTimeLabel(it)} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span></div>
         <div class="ice-loc">${it.time_label}</div>
-        <div class="hint">${assignedTo ? `Referee: ${assignedTo.name}${mine?' (you)':''}` : 'No referee assigned yet'}</div>
+        <div class="hint">${assignedTo ? `Referee: ${assignedTo.name}${mine?' (you)':''}` : (it.ref_status==='none' ? 'No referee needed for this game' : 'No referee assigned yet')}</div>
+        ${assignedTo && wl.length ? `<div class="hint">${wl.length} on waitlist${onWaitlist?' (you included)':''}</div>` : ''}
       </div>
-      ${mine
-        ? `<button class="btn danger small" onclick="releaseRefGame('${it.id}')">Release</button>`
-        : assignedTo
-        ? `<button class="btn ghost small" disabled>Taken</button>`
-        : `<button class="btn purple small" onclick="claimRefGame('${it.id}')">Claim</button>`}
+      ${actionHTML}
     </div>`;
   }).join('') : '<div class="empty">No ice times posted yet.</div>'}
   `;
@@ -1058,6 +1073,20 @@ async function releaseRefGame(id){
   await loadIceTimes();
   render();
   showToast('Game released');
+}
+async function joinWaitlist(id){
+  const { error } = await sb.from('referee_waitlist').insert({ ice_time_id:id, user_id:me.id });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast("You're on the waitlist ✓");
+}
+async function leaveWaitlist(id){
+  const { error } = await sb.from('referee_waitlist').delete().eq('ice_time_id', id).eq('user_id', me.id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Left waitlist');
 }
 function renderRefRoster(){
   const refs = refereeRoster();
