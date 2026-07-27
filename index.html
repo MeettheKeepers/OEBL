@@ -261,6 +261,7 @@
     <nav class="tabs" id="tabs"></nav>
     <div class="role-toggle" id="roleToggle" style="display:none;">
       <button id="roleBtnPlayer" onclick="setRole('player')">Player</button>
+      <button id="roleBtnGoalie" onclick="setRole('goalie')" style="display:none;">Goalie</button>
       <button id="roleBtnReferee" onclick="setRole('referee')" style="display:none;">Referee</button>
       <button id="roleBtnAdmin" onclick="setRole('admin')" style="display:none;">Commissioner</button>
     </div>
@@ -304,6 +305,19 @@ const REF_STATUS = {
   wanted: { label:'Ref Wanted', color:'#e0c34f' },
   needed: { label:'Ref Needed', color:'#e05a5a' },
 };
+const GOALIE_STATUS = {
+  none:   { label:'No Goalie Needed', color:'#4fd18a' },
+  wanted: { label:'Goalie Wanted', color:'#e0c34f' },
+  needed: { label:'Goalie Needed', color:'#e05a5a' },
+};
+const GENDERS = ['Male','Female','Other'];
+function rateOptionsHTML(selectedCents){
+  let html = '';
+  for(let c=0;c<=10000;c+=500){
+    html += `<option value="${c}" ${Number(selectedCents)===c?'selected':''}>$${c/100}</option>`;
+  }
+  return html;
+}
 const VAPID_PUBLIC_KEY = 'BCS0TEMcUCiKgZgQAJFW7uuzsbubtWXu71tY_KYoMpqOg5_ipzy5212S9wye4GVr5XBNWuO7wJfvpWrhXCYWEHE';
 // Arenas are now commissioner-managed per league (see `arenas` table / loadArenas()).
 const TEAMS = [['A','Team Light'], ['B','Team Dark']];
@@ -335,7 +349,7 @@ let activeStatsGameId = null; // id of the ice_time currently selected in Set St
 let announcements = []; // announcements rows for activeLeague
 let pushStatus = 'unknown'; // 'unsupported' | 'denied' | 'not-subscribed' | 'subscribed'
 let swRegistration = null;
-let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age'
+let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age' | 'gender'
 let rosterView = 'active'; // 'active' | 'archived'
 let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
 let searchFilters = { name:'', minAge:'', maxAge:'', minRank:1, maxRank:10, position:'any', status:'any' };
@@ -397,12 +411,16 @@ async function enterApp(sess){
   me.preferred_arenas = me.preferred_arenas || {};
   me.vacations = me.vacations || [];
   me.referee_arenas = me.referee_arenas || {};
+  me.goalie_arenas = me.goalie_arenas || {};
+  me.gender = me.gender || null;
   document.getElementById('signin').style.display='none';
   document.getElementById('app').style.display='block';
   document.getElementById('userName').textContent = me.name || me.email;
   renderLeagueTabs();
   await loadRoster();
   await loadRefPhones();
+  await loadGoaliePhones();
+  me.goaliePhone = goaliePhones[me.id] || '';
   me.refereePhone = refPhones[me.id] || '';
   updateRoleToggleVisibility();
   await loadLeagueData();
@@ -522,6 +540,12 @@ const PLAYER_TABS = [
   {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
 ];
+const GOALIE_TABS = [
+  {id:'goaliedash', label:'Dashboard'},
+  {id:'goalieroster', label:'Goalie Roster'},
+  {id:'profile', label:'Profile'},
+  {id:'announcements', label:'Announcements'},
+];
 const REFEREE_TABS = [
   {id:'refdash', label:'Dashboard'},
   {id:'refroster', label:'Referee Roster'},
@@ -535,25 +559,31 @@ const ADMIN_TABS = [
   {id:'setstats', label:'Set Stats'},
   {id:'roster', label:'Roster'},
   {id:'message', label:'Message Players'},
+  {id:'goalieroster', label:'Goalie Roster'},
   {id:'refroster', label:'Referee Roster'},
   {id:'pastgames', label:'Past Games'},
   {id:'merch', label:'Merch'},
 ];
-function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
+function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
 function updateRoleToggleVisibility(){
   const isRef = (me.positions||[]).includes('REF');
-  document.getElementById('roleToggle').style.display = (me.is_commissioner || isRef) ? 'flex' : 'none';
+  const isGoalie = (me.positions||[]).includes('G');
+  document.getElementById('roleToggle').style.display = (me.is_commissioner || isRef || isGoalie) ? 'flex' : 'none';
   document.getElementById('roleBtnAdmin').style.display = me.is_commissioner ? '' : 'none';
   document.getElementById('roleBtnReferee').style.display = isRef ? '' : 'none';
+  document.getElementById('roleBtnGoalie').style.display = isGoalie ? '' : 'none';
   if(role==='referee' && !isRef) setRole('player');
+  if(role==='goalie' && !isGoalie) setRole('player');
   if(role==='admin' && !me.is_commissioner) setRole('player');
 }
 function setRole(r){
   if(r==='admin' && !me.is_commissioner) return;
   if(r==='referee' && !(me.positions||[]).includes('REF')) return;
+  if(r==='goalie' && !(me.positions||[]).includes('G')) return;
   editingGameId = null;
   role = r;
   document.getElementById('roleBtnPlayer').classList.toggle('active', r==='player');
+  document.getElementById('roleBtnGoalie').classList.toggle('active', r==='goalie');
   document.getElementById('roleBtnReferee').classList.toggle('active', r==='referee');
   document.getElementById('roleBtnAdmin').classList.toggle('active', r==='admin');
   const tabs = tabsForRole(r);
@@ -580,14 +610,16 @@ async function loadRoster(){
   roster = data || [];
 }
 async function loadIceTimes(){
-  const [{ data: its }, { data: sus }, { data: wl }] = await Promise.all([
+  const [{ data: its }, { data: sus }, { data: wl }, { data: gwl }] = await Promise.all([
     sb.from('ice_times').select('*').eq('league_id', activeLeague).eq('archived', false).order('game_date'),
     sb.from('ice_time_signups').select('*'),
     sb.from('referee_waitlist').select('*'),
+    sb.from('goalie_waitlist').select('*'),
   ]);
   iceTimes = its || [];
   signups = sus || [];
   refWaitlist = wl || [];
+  goalieWaitlist = gwl || [];
   if(activeGameId && !iceTimes.find(g=>g.id===activeGameId)) activeGameId = null;
   if(iceTimes.length && !activeGameId) activeGameId = iceTimes[0].id;
   if(activeGameId) await loadLines(activeGameId);
@@ -609,6 +641,8 @@ async function loadLines(gameId){
 }
 let refWaitlist = []; // referee_waitlist rows (all — small table, filtered client-side)
 let refPhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
+let goalieWaitlist = []; // goalie_waitlist rows (all — small table, filtered client-side)
+let goaliePhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
 let pastGames = [];       // archived ice_times rows (commissioner Past Games tab)
 let activePastGameId = null;
 let pastLines = [];       // game_lines for the currently-selected past game (kept separate from `lines` so viewing history never clobbers live Set Lines state)
@@ -619,6 +653,12 @@ async function loadRefPhones(){
   (data||[]).forEach(r=>{ refPhones[r.user_id] = r.phone; });
 }
 function refPhoneFor(id){ return refPhones[id] || ''; }
+async function loadGoaliePhones(){
+  const { data } = await sb.from('goalie_phones').select('*');
+  goaliePhones = {};
+  (data||[]).forEach(r=>{ goaliePhones[r.user_id] = r.phone; });
+}
+function goaliePhoneFor(id){ return goaliePhones[id] || ''; }
 
 /* ================= RENDER ROUTER ================= */
 function render(){
@@ -637,6 +677,8 @@ function render(){
   else if(activeTab==='message') main.innerHTML = renderMessagePlayers();
   else if(activeTab==='refdash') main.innerHTML = renderRefDashboard();
   else if(activeTab==='refroster') main.innerHTML = renderRefRoster();
+  else if(activeTab==='goaliedash') main.innerHTML = renderGoalieDashboard();
+  else if(activeTab==='goalieroster') main.innerHTML = renderGoalieRoster();
   else if(activeTab==='pastgames') main.innerHTML = renderPastGames();
 }
 
@@ -736,6 +778,7 @@ function renderDashboard(){
 /* ---------- PROFILE ---------- */
 function renderProfile(){
   if(role==='referee') return renderRefereeProfile();
+  if(role==='goalie') return renderGoalieProfile();
   return renderPlayerProfile();
 }
 function renderPlayerProfile(){
@@ -781,6 +824,16 @@ function renderPlayerProfile(){
     <div class="field" style="max-width:340px;">
       <select id="injurySelect" style="border-left:6px solid ${INJURY[me.injury_status||'green'].color};" onchange="updateInjury(this.value)">
         ${Object.entries(INJURY).map(([k,v])=>`<option value="${k}" ${(me.injury_status||'green')===k?'selected':''}>${v.label}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Gender</h3>
+    <p class="hint" style="margin-bottom:10px;">Used by the commissioner for roster sorting.</p>
+    <div class="field" style="max-width:340px;">
+      <select id="genderSelect" onchange="updateGender(this.value)">
+        <option value="" ${!me.gender?'selected':''}>— Not set —</option>
+        ${GENDERS.map(g=>`<option value="${g}" ${me.gender===g?'selected':''}>${g}</option>`).join('')}
       </select>
     </div>
   </div>
@@ -849,6 +902,14 @@ async function updateInjury(v){
   await loadRoster();
   render();
   showToast('Injury status updated ✓');
+}
+async function updateGender(v){
+  me.gender = v || null;
+  const { error } = await sb.from('profiles').update({ gender: me.gender }).eq('id', me.id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  render();
+  showToast('Gender updated ✓');
 }
 function addVacationPeriod(){
   const todayStr = new Date().toISOString().slice(0,10);
@@ -994,6 +1055,116 @@ async function saveRefereeProfile(){
   refPhones[me.id] = phone;
   await loadRoster();
   showToast('Referee profile saved ✓');
+}
+
+/* ---------- GOALIE PROFILE ---------- */
+function goalieArenaList(){ return (me.goalie_arenas && me.goalie_arenas[activeLeague]) || []; }
+function toggleGoalieArena(arenaId){
+  const cur = { ...(me.goalie_arenas||{}) };
+  const list = [...(cur[activeLeague]||[])];
+  const idx = list.findIndex(x=>x.arena_id===arenaId);
+  if(idx>-1) list.splice(idx,1);
+  else {
+    if(list.length>=5){ showToast('You can rank up to 5 arenas'); return; }
+    list.push({ arena_id: arenaId, price_cents: 0 });
+  }
+  cur[activeLeague] = list;
+  me.goalie_arenas = cur;
+  render();
+}
+function updateGoalieArenaPrice(arenaId, val){
+  const cur = { ...(me.goalie_arenas||{}) };
+  const list = [...(cur[activeLeague]||[])];
+  const idx = list.findIndex(x=>x.arena_id===arenaId);
+  if(idx>-1) list[idx] = { ...list[idx], price_cents: Number(val)||0 };
+  cur[activeLeague] = list;
+  me.goalie_arenas = cur;
+}
+function updateGoalieSkill(v){
+  me.goalie_skill = Number(v);
+  document.getElementById('goalieSkillNum').textContent = v;
+}
+function renderGoalieProfile(){
+  return `
+  <h2 class="section-title">Goalie Profile</h2>
+  <p class="section-sub">Set your rates, rink preferences, and availability — commissioners use this to pick goalies for games.</p>
+  <div class="panel grid cols-2">
+    <div style="text-align:center;">
+      <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Goalie Skill Level</label>
+      <div class="rank-display" id="goalieSkillNum">${me.goalie_skill}</div>
+      <div class="hint" style="margin-bottom:10px;">1 = brand new · 10 = could work playoffs</div>
+      <input type="range" min="1" max="10" value="${me.goalie_skill}" oninput="updateGoalieSkill(this.value)">
+    </div>
+    <div>
+      <div class="field"><label>Hourly Rate ($)</label>
+        <select id="goalieHourly">
+          <option value="">— not set —</option>
+          ${rateOptionsHTML(me.goalie_hourly_cents)}
+        </select>
+      </div>
+      <div class="field"><label>Experience</label><textarea id="goalieExperience" rows="3" placeholder="e.g. 8 years in net, junior B experience">${me.goalie_experience||''}</textarea></div>
+      <div class="field"><label>Phone Number</label><input id="goaliePhone" type="tel" value="${me.goaliePhone||''}" placeholder="e.g. 613-555-0123"></div>
+      <div class="hint">Your phone number is only visible to commissioners — never shown to other goalies.</div>
+    </div>
+    <button class="btn purple" style="margin-top:4px" onclick="saveGoalieProfile()">Save Goalie Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas &amp; Rates — ${activeLeague}</h3>
+    <p class="hint" style="margin-bottom:10px;">Rank the arenas you're willing to play at (up to 5) and set what you charge per game at each.</p>
+    <div class="chips" style="margin-bottom:14px;">
+      ${arenas.length ? arenas.map(a=>{
+        const idx = goalieArenaList().findIndex(x=>x.arena_id===a.id);
+        return `<div class="chip ${idx>-1?'on':''}" onclick="toggleGoalieArena('${a.id}')">${idx>-1?'#'+(idx+1)+' ':''}${a.name}</div>`;
+      }).join('') : '<span class="hint">No arenas set up yet for this league.</span>'}
+    </div>
+    ${goalieArenaList().map((item,idx)=>{
+      const arena = arenas.find(a=>a.id===item.arena_id);
+      return `<div class="row-flex" style="max-width:420px;margin-bottom:8px;">
+        <span>#${idx+1} ${arena?arena.name:'Unknown arena'}</span>
+        <div class="field" style="max-width:150px;margin:0;">
+          <select onchange="updateGoalieArenaPrice('${item.arena_id}', this.value)">${rateOptionsHTML(item.price_cents)}</select>
+        </div>
+      </div>`;
+    }).join('')}
+    <button class="btn purple" style="margin-top:10px" onclick="saveGoalieProfile()">Save Goalie Profile</button>
+  </div>
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Availability</h3>
+    <p class="hint" style="margin-bottom:10px;">Select the days you're usually available to play goalie.</p>
+    <div class="chips">
+      ${DAYS.map(d=>`<div class="chip ${me.availability[d]!==undefined?'on':''}" onclick="toggleDay('${d}')">${d}</div>`).join('')}
+    </div>
+    ${DAYS.filter(d=>me.availability[d]!==undefined).map(d=>`
+      <div class="field" style="max-width:320px;margin-top:12px;">
+        <label>Preferred time — ${d}</label>
+        <input value="${me.availability[d]||''}" placeholder="e.g. 7:00–9:00 PM" oninput="updateDayTime('${d}', this.value)">
+      </div>`).join('')}
+    <button class="btn purple" style="margin-top:14px" onclick="saveGoalieProfile()">Save Goalie Profile</button>
+  </div>`;
+}
+async function saveGoalieProfile(){
+  const hourlyEl = document.getElementById('goalieHourly');
+  const experienceEl = document.getElementById('goalieExperience');
+  const phoneEl = document.getElementById('goaliePhone');
+  if(hourlyEl) me.goalie_hourly_cents = hourlyEl.value !== '' ? Number(hourlyEl.value) : null;
+  if(experienceEl) me.goalie_experience = experienceEl.value;
+  const phone = phoneEl ? phoneEl.value.trim() : (me.goaliePhone||'');
+  const { error } = await sb.from('profiles').update({
+    goalie_skill: me.goalie_skill,
+    goalie_hourly_cents: me.goalie_hourly_cents,
+    goalie_experience: me.goalie_experience,
+    goalie_arenas: me.goalie_arenas,
+    availability: me.availability,
+  }).eq('id', me.id);
+  if(error){ showToast('Save failed: '+error.message); return; }
+  const { error: phoneErr } = await sb.from('goalie_phones').upsert(
+    { user_id: me.id, phone, updated_at: new Date().toISOString() }, { onConflict:'user_id' }
+  );
+  if(phoneErr){ showToast('Saved, but phone number failed: '+phoneErr.message); return; }
+  me.goaliePhone = phone;
+  goaliePhones[me.id] = phone;
+  await loadRoster();
+  showToast('Goalie profile saved ✓');
 }
 
 /* ---------- ICE TIMES ---------- */
@@ -1151,6 +1322,126 @@ async function unassignRef(gameId){
   await loadIceTimes();
   render();
   showToast('Referee unassigned ✓');
+}
+
+/* ---------- GOALIE DASHBOARD + ROSTER ---------- */
+function goalieRoster(){ return roster.filter(p=>(p.positions||[]).includes('G')); }
+function goalieWaitlistFor(iceTimeId){ return goalieWaitlist.filter(w=>w.ice_time_id===iceTimeId); }
+function renderGoalieDashboard(){
+  return `
+  <h2 class="section-title">Goalie Dashboard — ${activeLeague}</h2>
+  <p class="section-sub">Claim games you're available to play goalie for ${leagueName()}. Colour shows how badly a goalie is needed: green = not needed, yellow = wanted, red = needed.</p>
+  ${iceTimes.length ? iceTimes.map(it=>{
+    const assignedTo = it.goalie_id ? playerById(it.goalie_id) : null;
+    const mine = it.goalie_id === me.id;
+    const gs = GOALIE_STATUS[it.goalie_status||'none'];
+    const wl = goalieWaitlistFor(it.id);
+    const onWaitlist = wl.some(w=>w.user_id===me.id);
+    let actionHTML;
+    if(it.goalie_status==='none'){
+      actionHTML = `<span class="hint">No goalie needed</span>`;
+    } else if(mine){
+      actionHTML = `<button class="btn danger small" onclick="releaseGoalieGame('${it.id}')">Release</button>`;
+    } else if(assignedTo){
+      actionHTML = onWaitlist
+        ? `<button class="btn ghost small" onclick="leaveGoalieWaitlist('${it.id}')">Leave Waitlist</button>`
+        : `<button class="btn purple small" onclick="joinGoalieWaitlist('${it.id}')">Join Waitlist</button>`;
+    } else {
+      actionHTML = `<button class="btn purple small" onclick="claimGoalieGame('${it.id}')">Claim</button>`;
+    }
+    return `<div class="ice-card" style="border-left:6px solid ${gs.color};">
+      <div>
+        <div class="ice-date">${iceTimeLabel(it)} <span class="tag" style="background:${gs.color};color:#04241a;">${gs.label}</span></div>
+        <div class="ice-loc">${it.time_label}</div>
+        <div class="hint">${assignedTo ? `Goalie: ${assignedTo.name}${mine?' (you)':''}` : (it.goalie_status==='none' ? 'No goalie needed for this game' : 'No goalie assigned yet')}</div>
+        ${it.goalie_budget_cents!=null ? `<div class="hint">Budget: $${(it.goalie_budget_cents/100).toFixed(0)}</div>` : ''}
+        ${assignedTo && wl.length ? `<div class="hint">${wl.length} on waitlist${onWaitlist?' (you included)':''}</div>` : ''}
+      </div>
+      ${actionHTML}
+    </div>`;
+  }).join('') : '<div class="empty">No ice times posted yet.</div>'}
+  `;
+}
+async function claimGoalieGame(id){
+  const { error } = await sb.rpc('claim_goalie', { p_ice_time_id: id });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Game claimed ✓');
+}
+async function releaseGoalieGame(id){
+  const { error } = await sb.rpc('release_goalie', { p_ice_time_id: id });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Game released');
+}
+async function joinGoalieWaitlist(id){
+  const { error } = await sb.from('goalie_waitlist').insert({ ice_time_id:id, user_id:me.id });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast("You're on the waitlist ✓");
+}
+async function leaveGoalieWaitlist(id){
+  const { error } = await sb.from('goalie_waitlist').delete().eq('ice_time_id', id).eq('user_id', me.id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Left waitlist');
+}
+function renderGoalieRoster(){
+  const goalies = goalieRoster();
+  const showPhone = me.is_commissioner;
+  return `
+  <h2 class="section-title">Goalie Roster</h2>
+  <p class="section-sub">${goalies.length} goalie${goalies.length===1?'':'s'} available${showPhone?'':' — phone numbers are only visible to commissioners'}.</p>
+  <div class="grid cols-3">
+  ${goalies.length ? goalies.map(p=>{
+    const arenaList = (p.goalie_arenas && p.goalie_arenas[activeLeague]) || [];
+    const hourly = p.goalie_hourly_cents!=null ? '$'+(p.goalie_hourly_cents/100).toFixed(0)+'/hr' : 'No rate set';
+    const arenaText = arenaList.length ? arenaList.map((item,idx)=>{
+      const arena = arenas.find(a=>a.id===item.arena_id);
+      return `#${idx+1} ${arena?arena.name:'?'} ($${(item.price_cents/100).toFixed(0)})`;
+    }).join(', ') : 'No arena preferences set';
+    const assignedGames = iceTimes.filter(it=>it.goalie_id===p.id);
+    return `<div class="player-card">
+      <div class="pc-name">${p.name}</div>
+      <div class="pc-meta">Skill ${p.goalie_skill||5}/10 · ${hourly}</div>
+      <div class="pc-meta" style="margin-top:6px;">${arenaText}</div>
+      <div class="pc-meta" style="margin-top:6px;">${(p.goalie_experience||'').trim() || 'No experience listed'}</div>
+      <div class="pc-meta" style="margin-top:6px;">${availabilitySummary(p)}</div>
+      ${showPhone ? `<div class="pc-meta" style="margin-top:6px;">📞 ${goaliePhoneFor(p.id)||'Not provided'}</div>` : ''}
+      ${assignedGames.length ? `<div class="pc-meta" style="margin-top:6px;">Assigned: ${assignedGames.map(g=>`${iceTimeLabel(g)} <span style="cursor:pointer;color:var(--danger);font-weight:900;" onclick="unassignGoalie('${g.id}')">×</span>`).join(', ')}</div>` : ''}
+      ${me.is_commissioner ? `
+        <div class="field" style="margin:10px 0 6px;">
+          <select id="assignGoalieSel-${p.id}">
+            <option value="">— Assign to game —</option>
+            ${iceTimes.map(g=>`<option value="${g.id}">${iceTimeLabel(g)} (${g.game_date})${g.goalie_id===p.id?' — currently assigned':g.goalie_id?' — has goalie':''}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn purple small" onclick="assignGoalieFromRoster('${p.id}')">Assign to Game</button>
+      ` : ''}
+    </div>`;
+  }).join('') : '<div class="empty">No goalies yet.</div>'}
+  </div>`;
+}
+async function assignGoalieFromRoster(goalieId){
+  const sel = document.getElementById('assignGoalieSel-'+goalieId);
+  const gameId = sel ? sel.value : '';
+  if(!gameId){ showToast('Pick a game first'); return; }
+  const { error } = await sb.rpc('assign_goalie', { p_ice_time_id: gameId, p_goalie_id: goalieId });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Goalie assigned ✓');
+}
+async function unassignGoalie(gameId){
+  const { error } = await sb.rpc('assign_goalie', { p_ice_time_id: gameId, p_goalie_id: null });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Goalie unassigned ✓');
 }
 
 /* ---------- LINES ---------- */
@@ -1391,6 +1682,7 @@ function renderPostIce(){
   const editGame = editingGameId ? iceTimes.find(g=>g.id===editingGameId) : null;
   if(editingGameId && !editGame) editingGameId = null;
   const refStatusVal = editGame ? (editGame.ref_status||'none') : 'none';
+  const goalieStatusVal = editGame ? (editGame.goalie_status||'none') : 'none';
   return `
   <h2 class="section-title">${editGame ? 'Edit Ice Time' : 'Post New Ice Time'} — ${activeLeague}</h2>
   <p class="section-sub">${editGame ? `Editing ${iceTimeLabel(editGame)}. Changes save to this existing game — sign-ups, lines, and stats are kept.` : `Open a new session for ${leagueName()} players to sign up for.`}</p>
@@ -1418,6 +1710,16 @@ function renderPostIce(){
         <input id="newRefBudget" type="number" min="0" step="1" placeholder="e.g. 60" value="${editGame && editGame.ref_budget_cents!=null ? (editGame.ref_budget_cents/100).toFixed(0) : ''}">
         <div class="hint">Shown to referees on the Referee Dashboard so they know what the game pays before claiming.</div>
       </div>
+      <div class="field"><label>Goalie Requirement</label>
+        <select id="newGoalieStatus" style="border-left:6px solid ${GOALIE_STATUS[goalieStatusVal].color};" onchange="this.style.borderLeft='6px solid '+GOALIE_STATUS[this.value].color; document.getElementById('goalieBudgetWrap').style.display = this.value==='none' ? 'none' : 'block';">
+          ${Object.entries(GOALIE_STATUS).map(([k,v])=>`<option value="${k}" ${goalieStatusVal===k?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" id="goalieBudgetWrap" style="display:${goalieStatusVal==='none'?'none':'block'};">
+        <label>Budget for Goalie ($)</label>
+        <input id="newGoalieBudget" type="number" min="0" step="1" placeholder="e.g. 60" value="${editGame && editGame.goalie_budget_cents!=null ? (editGame.goalie_budget_cents/100).toFixed(0) : ''}">
+        <div class="hint">Shown to goalies on the Goalie Dashboard so they know what the game pays before claiming.</div>
+      </div>
       <button class="btn purple" onclick="postIce()">${editGame ? 'Save Changes' : 'Post Ice Time'}</button>
       ${editGame ? `<button class="btn ghost small" style="margin-top:8px;" onclick="cancelEditIce()">Cancel Edit</button>` : ''}
       <div class="hint">This ice time will automatically be available in Set Lines — no separate step needed.</div>
@@ -1428,8 +1730,10 @@ function renderPostIce(){
         const n = signups.filter(x=>x.ice_time_id===s.id).length;
         const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'unassigned';
         const rs = REF_STATUS[s.ref_status||'none'];
+        const goalieName = s.goalie_id ? (playerById(s.goalie_id)?.name||'Assigned') : 'unassigned';
+        const gs = GOALIE_STATUS[s.goalie_status||'none'];
         return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>${s.ref_budget_cents!=null?` <span class="tag">$${(s.ref_budget_cents/100).toFixed(0)}</span>`:''}</span>
+        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>${s.ref_budget_cents!=null?` <span class="tag">$${(s.ref_budget_cents/100).toFixed(0)}</span>`:''} · Goalie: ${goalieName} <span class="tag" style="background:${gs.color};color:#04241a;">${gs.label}</span>${s.goalie_budget_cents!=null?` <span class="tag">$${(s.goalie_budget_cents/100).toFixed(0)}</span>`:''}</span>
         <span style="display:flex;gap:6px;">
           <button class="btn ghost small" onclick="editIceTime('${s.id}')">Edit</button>
           <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
@@ -1455,9 +1759,13 @@ async function postIce(){
   const ref_status = document.getElementById('newRefStatus').value;
   const refBudgetEl = document.getElementById('newRefBudget');
   const ref_budget_cents = (ref_status!=='none' && refBudgetEl && refBudgetEl.value !== '') ? Math.round(Number(refBudgetEl.value)*100) : null;
+  const goalie_status = document.getElementById('newGoalieStatus').value;
+  const goalieBudgetEl = document.getElementById('newGoalieBudget');
+  const goalie_budget_cents = (goalie_status!=='none' && goalieBudgetEl && goalieBudgetEl.value !== '') ? Math.round(Number(goalieBudgetEl.value)*100) : null;
   const payload = {
     date_label, game_date, time_label, location, max_spots,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
+    goalie_status, goalie_budget_cents,
   };
   if(editingGameId){
     const { error } = await sb.from('ice_times').update(payload).eq('id', editingGameId);
@@ -1584,6 +1892,8 @@ function sortedRoster(list){
       if(ageB===null) return -1;
       return ageB-ageA;
     });
+  } else if(rosterSort==='gender'){
+    arr.sort((a,b)=> (a.gender||'').localeCompare(b.gender||'') || a.name.localeCompare(b.name));
   } else arr.sort((a,b)=> a.name.localeCompare(b.name));
   return arr;
 }
@@ -1629,12 +1939,13 @@ function renderRoster(){
         <option value="rank" ${rosterSort==='rank'?'selected':''}>Sort: Rank</option>
         <option value="games" ${rosterSort==='games'?'selected':''}>Sort: Games Played</option>
         <option value="age" ${rosterSort==='age'?'selected':''}>Sort: Age</option>
+        <option value="gender" ${rosterSort==='gender'?'selected':''}>Sort: Gender</option>
       </select>
     </div>
   </div>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Rank</th><th>Age</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Rank</th><th>Age</th><th>Gender</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
       const inj = INJURY[p.injury_status||'green'];
       const age = calcAge(p.birthdate);
@@ -1644,6 +1955,7 @@ function renderRoster(){
         <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}${unavailable?' <span class="tag" style="background:var(--danger);color:#fff;">UNAVAILABLE</span>':''}</td>
         <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
         <td>${age!==null?age:'—'}</td>
+        <td>${p.gender||'—'}</td>
         <td>${gamesPlayed(p)}</td>
         <td><span class="tag" style="background:${inj.color};color:#04241a;">${(p.injury_status||'green').toUpperCase()}</span></td>
         <td>${vacationSummary(p)}</td>
@@ -1662,7 +1974,7 @@ function renderRoster(){
           `}
         </td>
       </tr>`;
-    }).join('') : `<tr><td colspan="9" class="empty">No ${rosterView} players.</td></tr>`}
+    }).join('') : `<tr><td colspan="10" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
   </div>`;
 }
