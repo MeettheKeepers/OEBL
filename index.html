@@ -487,6 +487,7 @@ async function setLeague(code){
   if(code===activeLeague) return;
   activeLeague = code;
   activeGameId = null;
+  editingGameId = null;
   renderLeagueTabs();
   await loadLeagueData();
   render();
@@ -550,6 +551,7 @@ function updateRoleToggleVisibility(){
 function setRole(r){
   if(r==='admin' && !me.is_commissioner) return;
   if(r==='referee' && !(me.positions||[]).includes('REF')) return;
+  editingGameId = null;
   role = r;
   document.getElementById('roleBtnPlayer').classList.toggle('active', r==='player');
   document.getElementById('roleBtnReferee').classList.toggle('active', r==='referee');
@@ -565,6 +567,7 @@ function renderTabs(tabs){
 }
 function goTab(id){
   activeTab = id;
+  if(id!=='postice') editingGameId = null;
   const tabs = tabsForRole(role);
   [...document.querySelectorAll('#tabs button')].forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
   if(id==='pastgames'){ openPastGames(); return; }
@@ -609,6 +612,7 @@ let refPhones = {}; // user_id -> phone (RLS returns only what the viewer is all
 let pastGames = [];       // archived ice_times rows (commissioner Past Games tab)
 let activePastGameId = null;
 let pastLines = [];       // game_lines for the currently-selected past game (kept separate from `lines` so viewing history never clobbers live Set Lines state)
+let editingGameId = null; // id of the ice_time currently being edited in Post Ice Time (null = posting a new one)
 async function loadRefPhones(){
   const { data } = await sb.from('referee_phones').select('*');
   refPhones = {};
@@ -1371,35 +1375,51 @@ async function removeArena(id, name){
   render();
   showToast('Arena removed ✓');
 }
+function formatKeyFor(game){
+  const entry = Object.entries(GAME_FORMATS).find(([k,f])=> f.fwd_lines===(game.fwd_lines||2) && f.def_pairs===(game.def_pairs||2) && f.goalies===(game.goalies||1));
+  return entry ? entry[0] : 'default';
+}
+function editIceTime(id){
+  editingGameId = id;
+  render();
+}
+function cancelEditIce(){
+  editingGameId = null;
+  render();
+}
 function renderPostIce(){
+  const editGame = editingGameId ? iceTimes.find(g=>g.id===editingGameId) : null;
+  if(editingGameId && !editGame) editingGameId = null;
+  const refStatusVal = editGame ? (editGame.ref_status||'none') : 'none';
   return `
-  <h2 class="section-title">Post New Ice Time — ${activeLeague}</h2>
-  <p class="section-sub">Open a new session for ${leagueName()} players to sign up for.</p>
-  ${availabilitySummaryHTML()}
-  ${arenaAggregateHTML()}
+  <h2 class="section-title">${editGame ? 'Edit Ice Time' : 'Post New Ice Time'} — ${activeLeague}</h2>
+  <p class="section-sub">${editGame ? `Editing ${iceTimeLabel(editGame)}. Changes save to this existing game — sign-ups, lines, and stats are kept.` : `Open a new session for ${leagueName()} players to sign up for.`}</p>
+  ${editGame ? '' : availabilitySummaryHTML()}
+  ${editGame ? '' : arenaAggregateHTML()}
   ${manageArenasHTML()}
   <div class="panel grid cols-2">
     <div>
-      <div class="field"><label>Location</label><select id="newLoc">${arenas.map(a=>`<option>${a.name}</option>`).join('')}</select></div>
-      <div class="field"><label>Date</label><input id="newDate" type="date"></div>
-      <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM"></div>
-      <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="18"></div>
+      <div class="field"><label>Location</label><select id="newLoc">${arenas.map(a=>`<option ${editGame && editGame.location===a.name?'selected':''}>${a.name}</option>`).join('')}</select></div>
+      <div class="field"><label>Date</label><input id="newDate" type="date" value="${editGame?editGame.game_date:''}"></div>
+      <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM" value="${editGame?(editGame.time_label||''):''}"></div>
+      <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="${editGame?editGame.max_spots:18}"></div>
       <div class="field"><label>Roster Format (for lines)</label>
         <select id="newFormat">
-          ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}">${f.label}</option>`).join('')}
+          ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}" ${editGame && formatKeyFor(editGame)===k?'selected':''}>${f.label}</option>`).join('')}
         </select>
       </div>
       <div class="field"><label>Referee Requirement</label>
-        <select id="newRefStatus" style="border-left:6px solid ${REF_STATUS.none.color};" onchange="this.style.borderLeft='6px solid '+REF_STATUS[this.value].color; document.getElementById('refBudgetWrap').style.display = this.value==='none' ? 'none' : 'block';">
-          ${Object.entries(REF_STATUS).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+        <select id="newRefStatus" style="border-left:6px solid ${REF_STATUS[refStatusVal].color};" onchange="this.style.borderLeft='6px solid '+REF_STATUS[this.value].color; document.getElementById('refBudgetWrap').style.display = this.value==='none' ? 'none' : 'block';">
+          ${Object.entries(REF_STATUS).map(([k,v])=>`<option value="${k}" ${refStatusVal===k?'selected':''}>${v.label}</option>`).join('')}
         </select>
       </div>
-      <div class="field" id="refBudgetWrap" style="display:none;">
+      <div class="field" id="refBudgetWrap" style="display:${refStatusVal==='none'?'none':'block'};">
         <label>Budget for Referee ($)</label>
-        <input id="newRefBudget" type="number" min="0" step="1" placeholder="e.g. 60">
+        <input id="newRefBudget" type="number" min="0" step="1" placeholder="e.g. 60" value="${editGame && editGame.ref_budget_cents!=null ? (editGame.ref_budget_cents/100).toFixed(0) : ''}">
         <div class="hint">Shown to referees on the Referee Dashboard so they know what the game pays before claiming.</div>
       </div>
-      <button class="btn purple" onclick="postIce()">Post Ice Time</button>
+      <button class="btn purple" onclick="postIce()">${editGame ? 'Save Changes' : 'Post Ice Time'}</button>
+      ${editGame ? `<button class="btn ghost small" style="margin-top:8px;" onclick="cancelEditIce()">Cancel Edit</button>` : ''}
       <div class="hint">This ice time will automatically be available in Set Lines — no separate step needed.</div>
     </div>
     <div>
@@ -1410,7 +1430,10 @@ function renderPostIce(){
         const rs = REF_STATUS[s.ref_status||'none'];
         return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
         <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>${s.ref_budget_cents!=null?` <span class="tag">$${(s.ref_budget_cents/100).toFixed(0)}</span>`:''}</span>
-        <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
+        <span style="display:flex;gap:6px;">
+          <button class="btn ghost small" onclick="editIceTime('${s.id}')">Edit</button>
+          <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
+        </span>
       </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
   </div>`;
@@ -1432,12 +1455,20 @@ async function postIce(){
   const ref_status = document.getElementById('newRefStatus').value;
   const refBudgetEl = document.getElementById('newRefBudget');
   const ref_budget_cents = (ref_status!=='none' && refBudgetEl && refBudgetEl.value !== '') ? Math.round(Number(refBudgetEl.value)*100) : null;
-  const { error } = await sb.from('ice_times').insert({
-    date_label, game_date, time_label, location, max_spots, league_id:activeLeague,
+  const payload = {
+    date_label, game_date, time_label, location, max_spots,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
-  });
-  if(error){ showToast('Failed: '+error.message); return; }
-  showToast('Ice time posted ✓ — ready in Set Lines');
+  };
+  if(editingGameId){
+    const { error } = await sb.from('ice_times').update(payload).eq('id', editingGameId);
+    if(error){ showToast('Failed: '+error.message); return; }
+    showToast('Ice time updated ✓');
+    editingGameId = null;
+  } else {
+    const { error } = await sb.from('ice_times').insert({ ...payload, league_id:activeLeague });
+    if(error){ showToast('Failed: '+error.message); return; }
+    showToast('Ice time posted ✓ — ready in Set Lines');
+  }
   await loadIceTimes();
   render();
 }
