@@ -535,6 +535,7 @@ const ADMIN_TABS = [
   {id:'roster', label:'Roster'},
   {id:'message', label:'Message Players'},
   {id:'refroster', label:'Referee Roster'},
+  {id:'pastgames', label:'Past Games'},
   {id:'merch', label:'Merch'},
 ];
 function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
@@ -566,6 +567,7 @@ function goTab(id){
   activeTab = id;
   const tabs = tabsForRole(role);
   [...document.querySelectorAll('#tabs button')].forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
+  if(id==='pastgames'){ openPastGames(); return; }
   render();
 }
 
@@ -576,7 +578,7 @@ async function loadRoster(){
 }
 async function loadIceTimes(){
   const [{ data: its }, { data: sus }, { data: wl }] = await Promise.all([
-    sb.from('ice_times').select('*').eq('league_id', activeLeague).order('game_date'),
+    sb.from('ice_times').select('*').eq('league_id', activeLeague).eq('archived', false).order('game_date'),
     sb.from('ice_time_signups').select('*'),
     sb.from('referee_waitlist').select('*'),
   ]);
@@ -604,6 +606,9 @@ async function loadLines(gameId){
 }
 let refWaitlist = []; // referee_waitlist rows (all — small table, filtered client-side)
 let refPhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
+let pastGames = [];       // archived ice_times rows (commissioner Past Games tab)
+let activePastGameId = null;
+let pastLines = [];       // game_lines for the currently-selected past game (kept separate from `lines` so viewing history never clobbers live Set Lines state)
 async function loadRefPhones(){
   const { data } = await sb.from('referee_phones').select('*');
   refPhones = {};
@@ -628,6 +633,7 @@ function render(){
   else if(activeTab==='message') main.innerHTML = renderMessagePlayers();
   else if(activeTab==='refdash') main.innerHTML = renderRefDashboard();
   else if(activeTab==='refroster') main.innerHTML = renderRefRoster();
+  else if(activeTab==='pastgames') main.innerHTML = renderPastGames();
 }
 
 /* ---------- ANNOUNCEMENTS ---------- */
@@ -1053,6 +1059,7 @@ function renderRefDashboard(){
         <div class="ice-date">${iceTimeLabel(it)} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span></div>
         <div class="ice-loc">${it.time_label}</div>
         <div class="hint">${assignedTo ? `Referee: ${assignedTo.name}${mine?' (you)':''}` : (it.ref_status==='none' ? 'No referee needed for this game' : 'No referee assigned yet')}</div>
+        ${it.ref_budget_cents!=null ? `<div class="hint">Budget: $${(it.ref_budget_cents/100).toFixed(0)}</div>` : ''}
         ${assignedTo && wl.length ? `<div class="hint">${wl.length} on waitlist${onWaitlist?' (you included)':''}</div>` : ''}
       </div>
       ${actionHTML}
@@ -1102,6 +1109,7 @@ function renderRefRoster(){
       const arena = arenas.find(a=>a.id===item.arena_id);
       return `#${idx+1} ${arena?arena.name:'?'} ($${(item.price_cents/100).toFixed(0)})`;
     }).join(', ') : 'No arena preferences set';
+    const assignedGames = iceTimes.filter(it=>it.referee_id===p.id);
     return `<div class="player-card">
       <div class="pc-name">${p.name}</div>
       <div class="pc-meta">Skill ${p.referee_skill||5}/10 · ${hourly}</div>
@@ -1109,9 +1117,36 @@ function renderRefRoster(){
       <div class="pc-meta" style="margin-top:6px;">${(p.referee_experience||'').trim() || 'No experience listed'}</div>
       <div class="pc-meta" style="margin-top:6px;">${availabilitySummary(p)}</div>
       ${showPhone ? `<div class="pc-meta" style="margin-top:6px;">📞 ${refPhoneFor(p.id)||'Not provided'}</div>` : ''}
+      ${assignedGames.length ? `<div class="pc-meta" style="margin-top:6px;">Assigned: ${assignedGames.map(g=>`${iceTimeLabel(g)} <span style="cursor:pointer;color:var(--danger);font-weight:900;" onclick="unassignRef('${g.id}')">×</span>`).join(', ')}</div>` : ''}
+      ${me.is_commissioner ? `
+        <div class="field" style="margin:10px 0 6px;">
+          <select id="assignSel-${p.id}">
+            <option value="">— Assign to game —</option>
+            ${iceTimes.map(g=>`<option value="${g.id}">${iceTimeLabel(g)} (${g.game_date})${g.referee_id===p.id?' — currently assigned':g.referee_id?' — has ref':''}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn purple small" onclick="assignRefFromRoster('${p.id}')">Assign to Game</button>
+      ` : ''}
     </div>`;
   }).join('') : '<div class="empty">No referees yet.</div>'}
   </div>`;
+}
+async function assignRefFromRoster(refId){
+  const sel = document.getElementById('assignSel-'+refId);
+  const gameId = sel ? sel.value : '';
+  if(!gameId){ showToast('Pick a game first'); return; }
+  const { error } = await sb.rpc('assign_referee', { p_ice_time_id: gameId, p_referee_id: refId });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Referee assigned ✓');
+}
+async function unassignRef(gameId){
+  const { error } = await sb.rpc('assign_referee', { p_ice_time_id: gameId, p_referee_id: null });
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadIceTimes();
+  render();
+  showToast('Referee unassigned ✓');
 }
 
 /* ---------- LINES ---------- */
@@ -1355,9 +1390,14 @@ function renderPostIce(){
         </select>
       </div>
       <div class="field"><label>Referee Requirement</label>
-        <select id="newRefStatus" style="border-left:6px solid ${REF_STATUS.none.color};" onchange="this.style.borderLeft='6px solid '+REF_STATUS[this.value].color">
+        <select id="newRefStatus" style="border-left:6px solid ${REF_STATUS.none.color};" onchange="this.style.borderLeft='6px solid '+REF_STATUS[this.value].color; document.getElementById('refBudgetWrap').style.display = this.value==='none' ? 'none' : 'block';">
           ${Object.entries(REF_STATUS).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
         </select>
+      </div>
+      <div class="field" id="refBudgetWrap" style="display:none;">
+        <label>Budget for Referee ($)</label>
+        <input id="newRefBudget" type="number" min="0" step="1" placeholder="e.g. 60">
+        <div class="hint">Shown to referees on the Referee Dashboard so they know what the game pays before claiming.</div>
       </div>
       <button class="btn purple" onclick="postIce()">Post Ice Time</button>
       <div class="hint">This ice time will automatically be available in Set Lines — no separate step needed.</div>
@@ -1369,7 +1409,7 @@ function renderPostIce(){
         const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'unassigned';
         const rs = REF_STATUS[s.ref_status||'none'];
         return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span></span>
+        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>${s.ref_budget_cents!=null?` <span class="tag">$${(s.ref_budget_cents/100).toFixed(0)}</span>`:''}</span>
         <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
       </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
@@ -1390,9 +1430,11 @@ async function postIce(){
   const formatKey = document.getElementById('newFormat').value;
   const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
   const ref_status = document.getElementById('newRefStatus').value;
+  const refBudgetEl = document.getElementById('newRefBudget');
+  const ref_budget_cents = (ref_status!=='none' && refBudgetEl && refBudgetEl.value !== '') ? Math.round(Number(refBudgetEl.value)*100) : null;
   const { error } = await sb.from('ice_times').insert({
     date_label, game_date, time_label, location, max_spots, league_id:activeLeague,
-    fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status,
+    fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
   });
   if(error){ showToast('Failed: '+error.message); return; }
   showToast('Ice time posted ✓ — ready in Set Lines');
@@ -1652,6 +1694,71 @@ async function deletePlayer(id, name){
   showToast('Player deleted ✓');
   await loadRoster();
   render();
+}
+
+/* ---------- ADMIN: PAST GAMES ---------- */
+async function loadPastGames(){
+  const { data } = await sb.from('ice_times').select('*').eq('league_id', activeLeague).eq('archived', true).order('game_date', { ascending:false });
+  pastGames = data || [];
+}
+async function loadPastGameLines(gameId){
+  const { data } = await sb.from('game_lines').select('*').eq('game_id', gameId);
+  pastLines = data || [];
+}
+async function openPastGames(){
+  await loadPastGames();
+  if(activePastGameId && !pastGames.find(g=>g.id===activePastGameId)) activePastGameId = null;
+  if(pastGames.length && !activePastGameId) activePastGameId = pastGames[0].id;
+  if(activePastGameId) await loadPastGameLines(activePastGameId);
+  else pastLines = [];
+  render();
+}
+async function selectPastGame(id){
+  activePastGameId = id;
+  await loadPastGameLines(id);
+  render();
+}
+function renderPastGames(){
+  if(!pastGames.length){
+    return `<h2 class="section-title">Past Games — ${activeLeague}</h2>
+    <p class="section-sub">Games are archived automatically the day after they're played. Lines, stats, and scores stay available here.</p>
+    <div class="empty">No past games yet.</div>`;
+  }
+  const game = pastGames.find(g=>g.id===activePastGameId) || pastGames[0];
+  const opts = pastGames.map(g=>`<option value="${g.id}" ${g.id===game.id?'selected':''}>${iceTimeLabel(g)} (${g.game_date})</option>`).join('');
+  const gameStats = allStats.filter(s=>s.game_id===game.id);
+  const statFor = (pid)=> gameStats.find(s=>s.player_id===pid);
+  const teamGoals = (team)=> pastLines.filter(l=>l.team===team && l.player_id)
+    .reduce((sum,l)=>{ const st = statFor(l.player_id); return sum + (st?st.goals:0); }, 0);
+  const scoreA = teamGoals('A'), scoreB = teamGoals('B');
+  const refName = game.referee_id ? (playerById(game.referee_id)?.name||'Assigned') : 'Not assigned';
+  const teamPanel = (team, label)=>{
+    const teamLines = pastLines.filter(l=>l.team===team && l.player_id);
+    return `<div class="panel">
+      <h3 style="margin-top:0;font-size:15px;">${label} — ${team==='A'?scoreA:scoreB}</h3>
+      ${teamLines.length ? teamLines.map(l=>{
+        const p = playerById(l.player_id);
+        const st = statFor(l.player_id);
+        return `<div class="row-flex" style="padding:6px 0;border-bottom:1px solid var(--line);">
+          <span>${p?p.name:'Unknown'} <span class="hint">${l.slot_key}</span></span>
+          <span class="hint">${st?`${st.goals}G ${st.assists}A`:'0G 0A'}</span>
+        </div>`;
+      }).join('') : '<div class="hint">No lines were set for this game.</div>'}
+    </div>`;
+  };
+  return `
+  <h2 class="section-title">Past Games — ${activeLeague}</h2>
+  <p class="section-sub">${pastGames.length} past game${pastGames.length===1?'':'s'}. Games archive automatically the day after they're played.</p>
+  <div class="field" style="max-width:360px;"><select onchange="selectPastGame(this.value)">${opts}</select></div>
+  <div class="panel" style="margin:12px 0;">
+    <div class="row-flex"><strong>${iceTimeLabel(game)}</strong><span class="hint">${game.game_date}</span></div>
+    <div class="hint" style="margin-top:4px;">${game.time_label} · Referee: ${refName}${game.ref_budget_cents!=null?` · Budget: $${(game.ref_budget_cents/100).toFixed(0)}`:''}</div>
+    <div style="font-family:'Anton',sans-serif;font-size:32px;margin-top:10px;color:var(--teal);">${game.team_a_name||'Team A'} ${scoreA} – ${scoreB} ${game.team_b_name||'Team B'}</div>
+  </div>
+  <div class="grid cols-2" style="align-items:start;">
+    ${teamPanel('A', game.team_a_name||'Team Light')}
+    ${teamPanel('B', game.team_b_name||'Team Dark')}
+  </div>`;
 }
 
 /* ---------- ADMIN: MESSAGE PLAYERS ---------- */
