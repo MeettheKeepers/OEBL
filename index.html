@@ -32,7 +32,8 @@
     --header-bg:rgba(10,13,18,.92);
   }
   *{box-sizing:border-box;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
+  html{background:var(--bg);}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
   h1,h2,h3,.display{font-family:'Anton',sans-serif;letter-spacing:1px;text-transform:uppercase;}
   a{color:inherit;}
   button{font-family:'Inter',sans-serif;cursor:pointer;}
@@ -415,6 +416,8 @@ async function enterApp(sess){
   me.gender = me.gender || null;
   document.getElementById('signin').style.display='none';
   document.getElementById('app').style.display='block';
+  document.documentElement.style.background = '#ffffff';
+  document.body.style.background = '#ffffff';
   document.getElementById('userName').textContent = me.name || me.email;
   renderLeagueTabs();
   await loadRoster();
@@ -527,6 +530,8 @@ async function signOut(){
   session = null; me = null;
   document.getElementById('app').style.display='none';
   document.getElementById('signin').style.display='flex';
+  document.documentElement.style.background = '';
+  document.body.style.background = '';
   setMsg('');
 }
 
@@ -1339,12 +1344,20 @@ function renderGoalieDashboard(){
     } else {
       actionHTML = `<button class="btn purple small" onclick="claimGoalieGame('${it.id}')">Claim</button>`;
     }
+    const reqBits = [];
+    if(it.goalie_status!=='none'){
+      reqBits.push(`${it.goalie_count||1} needed`);
+      reqBits.push(`Gender: ${it.goalie_gender_pref||'Any'}`);
+      reqBits.push(`Caliber: ${it.goalie_caliber||'Any'}`);
+      reqBits.push(`Rank: ${it.goalie_rank_req!=null?it.goalie_rank_req:'Any'}`);
+    }
     return `<div class="ice-card" style="border-left:6px solid ${gs.color};">
       <div>
         <div class="ice-date">${iceTimeLabel(it)} <span class="tag" style="background:${gs.color};color:#04241a;">${gs.label}</span></div>
         <div class="ice-loc">${it.time_label}</div>
         <div class="hint">${assignedTo ? `Goalie: ${assignedTo.name}${mine?' (you)':''}` : (it.goalie_status==='none' ? 'No goalie needed for this game' : 'No goalie assigned yet')}</div>
         ${it.goalie_budget_cents!=null ? `<div class="hint">Budget: $${(it.goalie_budget_cents/100).toFixed(0)}</div>` : ''}
+        ${reqBits.length ? `<div class="hint">${reqBits.join(' · ')}</div>` : ''}
         ${assignedTo && wl.length ? `<div class="hint">${wl.length} on waitlist${onWaitlist?' (you included)':''}</div>` : ''}
       </div>
       ${actionHTML}
@@ -1701,7 +1714,7 @@ function renderPostIce(){
         <div class="hint">Shown to referees on the Referee Dashboard so they know what the game pays before claiming.</div>
       </div>
       <div class="field"><label>Goalie Requirement</label>
-        <select id="newGoalieStatus" style="border-left:6px solid ${GOALIE_STATUS[goalieStatusVal].color};" onchange="this.style.borderLeft='6px solid '+GOALIE_STATUS[this.value].color; document.getElementById('goalieBudgetWrap').style.display = this.value==='none' ? 'none' : 'block';">
+        <select id="newGoalieStatus" style="border-left:6px solid ${GOALIE_STATUS[goalieStatusVal].color};" onchange="this.style.borderLeft='6px solid '+GOALIE_STATUS[this.value].color; const d = this.value==='none' ? 'none' : 'block'; document.getElementById('goalieBudgetWrap').style.display = d; document.getElementById('goalieDetailWrap').style.display = d;">
           ${Object.entries(GOALIE_STATUS).map(([k,v])=>`<option value="${k}" ${goalieStatusVal===k?'selected':''}>${v.label}</option>`).join('')}
         </select>
       </div>
@@ -1709,6 +1722,37 @@ function renderPostIce(){
         <label>Budget for Goalie ($)</label>
         <input id="newGoalieBudget" type="number" min="0" step="1" placeholder="e.g. 60" value="${editGame && editGame.goalie_budget_cents!=null ? (editGame.goalie_budget_cents/100).toFixed(0) : ''}">
         <div class="hint">Shown to goalies on the Goalie Dashboard so they know what the game pays before claiming.</div>
+      </div>
+      <div id="goalieDetailWrap" style="display:${goalieStatusVal==='none'?'none':'block'};">
+        <div class="field"><label># Goalies Needed</label>
+          <select id="newGoalieCount">
+            <option value="1" ${(!editGame || (editGame.goalie_count||1)===1)?'selected':''}>1</option>
+            <option value="2" ${editGame && editGame.goalie_count===2?'selected':''}>2</option>
+          </select>
+        </div>
+        <div class="field"><label>Gender Preference</label>
+          <select id="newGoalieGenderPref">
+            <option value="" ${!(editGame && editGame.goalie_gender_pref)?'selected':''}>Any</option>
+            <option value="Male" ${editGame && editGame.goalie_gender_pref==='Male'?'selected':''}>Male</option>
+            <option value="Female" ${editGame && editGame.goalie_gender_pref==='Female'?'selected':''}>Female</option>
+          </select>
+        </div>
+        <div class="field"><label>Game Caliber Expectation</label>
+          <select id="newGoalieCaliber">
+            <option value="" ${!(editGame && editGame.goalie_caliber)?'selected':''}>Any</option>
+            ${['C','B','A','AA'].map(c=>`<option value="${c}" ${editGame && editGame.goalie_caliber===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Specific Rank Requirement</label>
+          <div><button type="button" class="chip ${editGame && editGame.goalie_rank_req!=null?'on':''}" id="rankReqToggle" onclick="toggleGoalieRankReq(this)">Looking for X ranked goalie</button></div>
+          <div id="goalieRankWrap" style="display:${editGame && editGame.goalie_rank_req!=null?'block':'none'};margin-top:8px;">
+            <select id="newGoalieRankReq">
+              ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${editGame && editGame.goalie_rank_req===n?'selected':''}>${n}</option>`).join('')}
+            </select>
+            <div class="hint">Leave the toggle off above if any rank is fine.</div>
+          </div>
+        </div>
       </div>
       <button class="btn purple" onclick="postIce()">${editGame ? 'Save Changes' : 'Post Ice Time'}</button>
       ${editGame ? `<button class="btn ghost small" style="margin-top:8px;" onclick="cancelEditIce()">Cancel Edit</button>` : ''}
@@ -1718,16 +1762,29 @@ function renderPostIce(){
       <h3 style="font-size:14px;color:var(--muted);margin-top:0;">Currently Posted</h3>
       ${iceTimes.map(s=>{
         const n = signups.filter(x=>x.ice_time_id===s.id).length;
-        const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'unassigned';
+        const refName = s.referee_id ? (playerById(s.referee_id)?.name||'Assigned') : 'Unassigned';
         const rs = REF_STATUS[s.ref_status||'none'];
-        const goalieName = s.goalie_id ? (playerById(s.goalie_id)?.name||'Assigned') : 'unassigned';
+        const goalieName = s.goalie_id ? (playerById(s.goalie_id)?.name||'Assigned') : 'Unassigned';
         const gs = GOALIE_STATUS[s.goalie_status||'none'];
-        return `<div class="hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span>• ${s.date_label} — ${s.location} (${n}/${s.max_spots}) · Ref: ${refName} <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>${s.ref_budget_cents!=null?` <span class="tag">$${(s.ref_budget_cents/100).toFixed(0)}</span>`:''} · Goalie: ${goalieName} <span class="tag" style="background:${gs.color};color:#04241a;">${gs.label}</span>${s.goalie_budget_cents!=null?` <span class="tag">$${(s.goalie_budget_cents/100).toFixed(0)}</span>`:''}</span>
-        <span style="display:flex;gap:6px;">
+        return `<div class="panel" style="margin-bottom:10px;padding:14px 16px;">
+        <div class="row-flex" style="margin-bottom:8px;flex-wrap:wrap;">
+          <strong style="font-size:13px;">${s.date_label} — ${s.location}</strong>
+          <span class="hint">${n}/${s.max_spots} spots filled</span>
+        </div>
+        <div class="hint" style="margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+          <span>Ref: ${refName}</span>
+          <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>
+          ${s.ref_budget_cents!=null ? `<span class="tag">$${(s.ref_budget_cents/100).toFixed(0)}</span>` : ''}
+        </div>
+        <div class="hint" style="margin-bottom:10px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+          <span>Goalie: ${goalieName}</span>
+          <span class="tag" style="background:${gs.color};color:#04241a;">${gs.label}</span>
+          ${s.goalie_budget_cents!=null ? `<span class="tag">$${(s.goalie_budget_cents/100).toFixed(0)}</span>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;">
           <button class="btn ghost small" onclick="editIceTime('${s.id}')">Edit</button>
           <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
-        </span>
+        </div>
       </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
   </div>`;
@@ -1736,6 +1793,12 @@ function formatDateLabel(dateStr){
   if(!dateStr) return 'TBD';
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+}
+function toggleGoalieRankReq(btn){
+  const wrap = document.getElementById('goalieRankWrap');
+  const showing = wrap.style.display !== 'none';
+  wrap.style.display = showing ? 'none' : 'block';
+  btn.classList.toggle('on', !showing);
 }
 async function postIce(){
   const game_date = document.getElementById('newDate').value;
@@ -1752,10 +1815,15 @@ async function postIce(){
   const goalie_status = document.getElementById('newGoalieStatus').value;
   const goalieBudgetEl = document.getElementById('newGoalieBudget');
   const goalie_budget_cents = (goalie_status!=='none' && goalieBudgetEl && goalieBudgetEl.value !== '') ? Math.round(Number(goalieBudgetEl.value)*100) : null;
+  const goalie_count = Number(document.getElementById('newGoalieCount').value) || 1;
+  const goalie_gender_pref = document.getElementById('newGoalieGenderPref').value || null;
+  const goalie_caliber = document.getElementById('newGoalieCaliber').value || null;
+  const rankWrap = document.getElementById('goalieRankWrap');
+  const goalie_rank_req = (rankWrap && rankWrap.style.display !== 'none') ? Number(document.getElementById('newGoalieRankReq').value) : null;
   const payload = {
     date_label, game_date, time_label, location, max_spots,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
-    goalie_status, goalie_budget_cents,
+    goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_rank_req,
   };
   if(editingGameId){
     const { error } = await sb.from('ice_times').update(payload).eq('id', editingGameId);
