@@ -1349,7 +1349,9 @@ function renderGoalieDashboard(){
       reqBits.push(`${it.goalie_count||1} needed`);
       reqBits.push(`Gender: ${it.goalie_gender_pref||'Any'}`);
       reqBits.push(`Caliber: ${it.goalie_caliber||'Any'}`);
-      reqBits.push(`Rank: ${it.goalie_rank_req!=null?it.goalie_rank_req:'Any'}`);
+      const rMin = it.goalie_rank_min, rMax = it.goalie_rank_max;
+      const rankText = (rMin!=null && rMax!=null) ? `${rMin}–${rMax}` : rMin!=null ? `${rMin}+` : rMax!=null ? `up to ${rMax}` : 'Any';
+      reqBits.push(`Rank: ${rankText}`);
     }
     return `<div class="ice-card" style="border-left:6px solid ${gs.color};">
       <div>
@@ -1745,13 +1747,24 @@ function renderPostIce(){
         </div>
         <div class="field">
           <label>Specific Rank Requirement</label>
-          <div><button type="button" class="chip ${editGame && editGame.goalie_rank_req!=null?'on':''}" id="rankReqToggle" onclick="toggleGoalieRankReq(this)">Looking for X ranked goalie</button></div>
-          <div id="goalieRankWrap" style="display:${editGame && editGame.goalie_rank_req!=null?'block':'none'};margin-top:8px;">
-            <select id="newGoalieRankReq">
-              ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${editGame && editGame.goalie_rank_req===n?'selected':''}>${n}</option>`).join('')}
-            </select>
-            <div class="hint">Leave the toggle off above if any rank is fine.</div>
+          <div><button type="button" class="chip ${editGame && (editGame.goalie_rank_min!=null||editGame.goalie_rank_max!=null)?'on':''}" id="rankReqToggle" onclick="toggleGoalieRankReq(this)">Looking for X ranked goalie</button></div>
+          <div id="goalieRankWrap" style="display:${editGame && (editGame.goalie_rank_min!=null||editGame.goalie_rank_max!=null)?'flex':'none'};gap:14px;margin-top:8px;">
+            <div>
+              <label class="hint" style="display:block;margin-bottom:4px;">Minimum Rank</label>
+              <select id="newGoalieRankMin">
+                <option value="" ${!(editGame && editGame.goalie_rank_min!=null)?'selected':''}>Any</option>
+                ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${editGame && editGame.goalie_rank_min===n?'selected':''}>${n}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="hint" style="display:block;margin-bottom:4px;">Maximum Rank</label>
+              <select id="newGoalieRankMax">
+                <option value="" ${!(editGame && editGame.goalie_rank_max!=null)?'selected':''}>Any</option>
+                ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${editGame && editGame.goalie_rank_max===n?'selected':''}>${n}</option>`).join('')}
+              </select>
+            </div>
           </div>
+          <div class="hint" style="margin-top:6px;">Leave the toggle off above if any rank is fine. With it on, set either or both of Minimum/Maximum — leave one as "Any" for an open-ended range.</div>
         </div>
       </div>
       <button class="btn purple" onclick="postIce()">${editGame ? 'Save Changes' : 'Post Ice Time'}</button>
@@ -1797,7 +1810,7 @@ function formatDateLabel(dateStr){
 function toggleGoalieRankReq(btn){
   const wrap = document.getElementById('goalieRankWrap');
   const showing = wrap.style.display !== 'none';
-  wrap.style.display = showing ? 'none' : 'block';
+  wrap.style.display = showing ? 'none' : 'flex';
   btn.classList.toggle('on', !showing);
 }
 async function postIce(){
@@ -1819,11 +1832,15 @@ async function postIce(){
   const goalie_gender_pref = document.getElementById('newGoalieGenderPref').value || null;
   const goalie_caliber = document.getElementById('newGoalieCaliber').value || null;
   const rankWrap = document.getElementById('goalieRankWrap');
-  const goalie_rank_req = (rankWrap && rankWrap.style.display !== 'none') ? Number(document.getElementById('newGoalieRankReq').value) : null;
+  const rankOn = rankWrap && rankWrap.style.display !== 'none';
+  const rankMinEl = document.getElementById('newGoalieRankMin');
+  const rankMaxEl = document.getElementById('newGoalieRankMax');
+  const goalie_rank_min = (rankOn && rankMinEl.value !== '') ? Number(rankMinEl.value) : null;
+  const goalie_rank_max = (rankOn && rankMaxEl.value !== '') ? Number(rankMaxEl.value) : null;
   const payload = {
     date_label, game_date, time_label, location, max_spots,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
-    goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_rank_req,
+    goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_rank_min, goalie_rank_max,
   };
   if(editingGameId){
     const { error } = await sb.from('ice_times').update(payload).eq('id', editingGameId);
