@@ -790,6 +790,12 @@ function renderPlayerProfile(){
       <div class="field"><label>Name</label><input id="pName" value="${me.name||''}"></div>
       <div class="field"><label>Email</label><input value="${me.email||''}" disabled></div>
       <div class="field"><label>Birthdate</label><input id="pBirthdate" type="date" value="${me.birthdate||''}"></div>
+      <div class="field"><label>Gender</label>
+        <select id="pGender">
+          <option value="" ${!me.gender?'selected':''}>— Not set —</option>
+          ${GENDERS.map(g=>`<option value="${g}" ${me.gender===g?'selected':''}>${g}</option>`).join('')}
+        </select>
+      </div>
       <div class="field">
         <label>Positions (select all that apply)</label>
         <div class="chips" id="posChips">
@@ -824,16 +830,6 @@ function renderPlayerProfile(){
     <div class="field" style="max-width:340px;">
       <select id="injurySelect" style="border-left:6px solid ${INJURY[me.injury_status||'green'].color};" onchange="updateInjury(this.value)">
         ${Object.entries(INJURY).map(([k,v])=>`<option value="${k}" ${(me.injury_status||'green')===k?'selected':''}>${v.label}</option>`).join('')}
-      </select>
-    </div>
-  </div>
-  <div class="panel" style="margin-top:16px;">
-    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Gender</h3>
-    <p class="hint" style="margin-bottom:10px;">Used by the commissioner for roster sorting.</p>
-    <div class="field" style="max-width:340px;">
-      <select id="genderSelect" onchange="updateGender(this.value)">
-        <option value="" ${!me.gender?'selected':''}>— Not set —</option>
-        ${GENDERS.map(g=>`<option value="${g}" ${me.gender===g?'selected':''}>${g}</option>`).join('')}
       </select>
     </div>
   </div>
@@ -903,14 +899,6 @@ async function updateInjury(v){
   render();
   showToast('Injury status updated ✓');
 }
-async function updateGender(v){
-  me.gender = v || null;
-  const { error } = await sb.from('profiles').update({ gender: me.gender }).eq('id', me.id);
-  if(error){ showToast('Failed: '+error.message); return; }
-  await loadRoster();
-  render();
-  showToast('Gender updated ✓');
-}
 function addVacationPeriod(){
   const todayStr = new Date().toISOString().slice(0,10);
   me.vacations = [...(me.vacations||[]), { start: todayStr, end: todayStr }];
@@ -943,9 +931,11 @@ async function saveProfile(){
   me.name = document.getElementById('pName').value || me.name;
   const birthdateEl = document.getElementById('pBirthdate');
   if(birthdateEl) me.birthdate = birthdateEl.value || null;
+  const genderEl = document.getElementById('pGender');
+  if(genderEl) me.gender = genderEl.value || null;
   const { error } = await sb.from('profiles').update({
     name: me.name, rank: me.rank, positions: me.positions, availability: me.availability,
-    birthdate: me.birthdate, vacations: me.vacations,
+    birthdate: me.birthdate, vacations: me.vacations, gender: me.gender,
     preferred_arenas: me.preferred_arenas,
   }).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
