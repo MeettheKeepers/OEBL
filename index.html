@@ -794,11 +794,11 @@ function renderPlayerProfile(){
   <p class="section-sub">Set your skill ranking and eligible positions — the commissioner uses this to build balanced lines.</p>
   <div class="panel grid cols-2">
     <div>
-      <div class="field"><label>Name</label><input id="pName" value="${me.name||''}"></div>
+      <div class="field"><label>Name</label><input id="pName" value="${me.name||''}" oninput="me.name=this.value"></div>
       <div class="field"><label>Email</label><input value="${me.email||''}" disabled></div>
-      <div class="field"><label>Birthdate</label><input id="pBirthdate" type="date" value="${me.birthdate||''}"></div>
+      <div class="field"><label>Birthdate</label><input id="pBirthdate" type="date" value="${me.birthdate||''}" oninput="me.birthdate=this.value||null"></div>
       <div class="field"><label>Gender</label>
-        <select id="pGender">
+        <select id="pGender" onchange="me.gender=this.value||null">
           <option value="" ${!me.gender?'selected':''}>— Not set —</option>
           ${GENDERS.map(g=>`<option value="${g}" ${me.gender===g?'selected':''}>${g}</option>`).join('')}
         </select>
@@ -990,9 +990,9 @@ function renderRefereeProfile(){
       <input type="range" min="1" max="10" value="${me.referee_skill}" oninput="updateRefSkill(this.value)">
     </div>
     <div>
-      <div class="field"><label>Hourly Rate ($)</label><input type="number" min="0" step="1" id="refHourly" value="${me.referee_hourly_cents!=null?(me.referee_hourly_cents/100).toFixed(0):''}" placeholder="e.g. 50"></div>
-      <div class="field"><label>Experience</label><textarea id="refExperience" rows="3" placeholder="e.g. 6 years reffing, Hockey Canada Level 2 certified">${me.referee_experience||''}</textarea></div>
-      <div class="field"><label>Phone Number</label><input id="refPhone" type="tel" value="${me.refereePhone||''}" placeholder="e.g. 613-555-0123"></div>
+      <div class="field"><label>Hourly Rate ($)</label><input type="number" min="0" step="1" id="refHourly" value="${me.referee_hourly_cents!=null?(me.referee_hourly_cents/100).toFixed(0):''}" placeholder="e.g. 50" oninput="me.referee_hourly_cents=this.value!==''?Math.round(Number(this.value)*100):null"></div>
+      <div class="field"><label>Experience</label><textarea id="refExperience" rows="3" placeholder="e.g. 6 years reffing, Hockey Canada Level 2 certified" oninput="me.referee_experience=this.value">${me.referee_experience||''}</textarea></div>
+      <div class="field"><label>Phone Number</label><input id="refPhone" type="tel" value="${me.refereePhone||''}" placeholder="e.g. 613-555-0123" oninput="me.refereePhone=this.value"></div>
       <div class="hint">Your phone number is only visible to commissioners — never shown to other referees.</div>
     </div>
     <button class="btn purple" style="margin-top:4px" onclick="saveRefereeProfile()">Save Referee Profile</button>
@@ -1094,13 +1094,13 @@ function renderGoalieProfile(){
     </div>
     <div>
       <div class="field"><label>Hourly Rate ($)</label>
-        <select id="goalieHourly">
+        <select id="goalieHourly" onchange="me.goalie_hourly_cents=this.value!==''?Number(this.value):null">
           <option value="">— not set —</option>
           ${rateOptionsHTML(me.goalie_hourly_cents)}
         </select>
       </div>
-      <div class="field"><label>Experience</label><textarea id="goalieExperience" rows="3" placeholder="e.g. 8 years in net, junior B experience">${me.goalie_experience||''}</textarea></div>
-      <div class="field"><label>Phone Number</label><input id="goaliePhone" type="tel" value="${me.goaliePhone||''}" placeholder="e.g. 613-555-0123"></div>
+      <div class="field"><label>Experience</label><textarea id="goalieExperience" rows="3" placeholder="e.g. 8 years in net, junior B experience" oninput="me.goalie_experience=this.value">${me.goalie_experience||''}</textarea></div>
+      <div class="field"><label>Phone Number</label><input id="goaliePhone" type="tel" value="${me.goaliePhone||''}" placeholder="e.g. 613-555-0123" oninput="me.goaliePhone=this.value"></div>
       <div class="hint">Your phone number is only visible to commissioners — never shown to other goalies.</div>
     </div>
     <button class="btn purple" style="margin-top:4px" onclick="saveGoalieProfile()">Save Goalie Profile</button>
@@ -1913,7 +1913,7 @@ function availabilitySummary(p){
   const av = p.availability || {};
   const days = DAYS.filter(d=>av[d]!==undefined);
   if(!days.length) return '<span class="hint">—</span>';
-  return days.map(d=>`<span class="tag pos">${d}${av[d]?': '+av[d]:''}</span>`).join(' ');
+  return `<div class="hint">${days.map(d=> av[d] ? `${d} ${av[d]}` : d).join(', ')}</div>`;
 }
 function availabilityAggregate(){
   const counts = {}; const times = {};
