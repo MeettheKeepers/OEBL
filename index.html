@@ -354,6 +354,7 @@ let pushStatus = 'unknown'; // 'unsupported' | 'denied' | 'not-subscribed' | 'su
 let swRegistration = null;
 let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age' | 'gender'
 let rosterView = 'active'; // 'active' | 'archived'
+let rosterShowAllLeagues = false; // commissioner: bypass per-league filter and show every player
 let editingPlayerId = null; // commissioner: profile id currently open in the edit-player modal
 let editingDraft = null;    // commissioner: working copy of that player's editable fields
 let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
@@ -811,6 +812,13 @@ function renderPlayerProfile(){
           ${POSITIONS.map(p=>`<div class="chip ${me.positions.includes(p)?'on':''}" onclick="togglePos('${p}')">${p}</div>`).join('')}
         </div>
       </div>
+      <div class="field">
+        <label>Leagues you play in</label>
+        <div class="chips" id="leagueChips">
+          ${LEAGUES.map(([code,name])=>`<div class="chip ${(me.leagues||[]).includes(code)?'on':''}" onclick="toggleLeague('${code}')" title="${name}">${code}</div>`).join('')}
+        </div>
+        <div class="hint" style="margin-top:6px;">You'll only show up on the Roster for the league(s) you select here. Pick just one if you only play in one league.</div>
+      </div>
       <button class="btn purple" style="margin-top:10px" onclick="saveProfile()">Save Profile</button>
     </div>
     <div style="text-align:center;">
@@ -884,6 +892,13 @@ function togglePos(p){
   updateRoleToggleVisibility();
   render();
 }
+function toggleLeague(code){
+  const list = [...(me.leagues||[])];
+  const i = list.indexOf(code);
+  if(i>-1) list.splice(i,1); else list.push(code);
+  me.leagues = list;
+  render();
+}
 function toggleDay(d){
   if(me.availability[d] !== undefined){
     const { [d]: _drop, ...rest } = me.availability;
@@ -945,7 +960,7 @@ async function saveProfile(){
   const { error } = await sb.from('profiles').update({
     name: me.name, rank: me.rank, positions: me.positions, availability: me.availability,
     birthdate: me.birthdate, vacations: me.vacations, gender: me.gender,
-    preferred_arenas: me.preferred_arenas,
+    preferred_arenas: me.preferred_arenas, leagues: me.leagues,
   }).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
   document.getElementById('userName').textContent = me.name;
@@ -1917,10 +1932,10 @@ function availabilitySummary(p){
   if(!days.length) return '<span class="hint">—</span>';
   return `<div class="hint">${days.map(d=> av[d] ? `${d} ${av[d]}` : d).join(', ')}</div>`;
 }
-function availabilityAggregate(){
+function availabilityAggregate(list){
   const counts = {}; const times = {};
   DAYS.forEach(d=>{ counts[d]=0; times[d]=[]; });
-  roster.forEach(p=>{
+  (list || roster).forEach(p=>{
     const av = p.availability || {};
     DAYS.forEach(d=>{
       if(av[d]!==undefined){
@@ -1932,6 +1947,10 @@ function availabilityAggregate(){
   return DAYS.map(d=>({ day:d, count:counts[d], times:times[d] }));
 }
 function activeRoster(){ return roster.filter(p=>!p.archived_at); }
+function rosterForLeague(list){
+  if(rosterShowAllLeagues) return list;
+  return list.filter(p=> (p.leagues||[]).includes(activeLeague));
+}
 function isOnVacation(p, dateStr){
   const list = p.vacations || [];
   const d = dateStr || new Date().toISOString().slice(0,10);
@@ -1976,8 +1995,8 @@ function sortedRoster(list){
   } else arr.sort((a,b)=> a.name.localeCompare(b.name));
   return arr;
 }
-function availabilitySummaryHTML(){
-  const rows = availabilityAggregate();
+function availabilitySummaryHTML(list){
+  const rows = availabilityAggregate(list);
   const maxCount = Math.max(1, ...rows.map(r=>r.count));
   return `<div class="panel" style="margin-bottom:16px;">
     <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Player Availability</h3>
@@ -1993,13 +2012,19 @@ function availabilitySummaryHTML(){
   </div>`;
 }
 function renderRoster(){
-  const activePlayers = sortedRoster(activeRoster());
-  const archivedPlayers = sortedRoster(roster.filter(p=>p.archived_at));
+  const activePlayers = sortedRoster(rosterForLeague(activeRoster()));
+  const archivedPlayers = sortedRoster(rosterForLeague(roster.filter(p=>p.archived_at)));
   const showList = rosterView==='archived' ? archivedPlayers : activePlayers;
   return `
-  <h2 class="section-title">Roster</h2>
-  <p class="section-sub">${activePlayers.length} active player${activePlayers.length===1?'':'s'}${archivedPlayers.length?` · ${archivedPlayers.length} archived`:''}. Sign-in is First Last name + password (no email) — names must be unique.</p>
-  ${availabilitySummaryHTML()}
+  <h2 class="section-title">Roster — ${activeLeague}</h2>
+  <p class="section-sub">${activePlayers.length} active player${activePlayers.length===1?'':'s'}${archivedPlayers.length?` · ${archivedPlayers.length} archived`:''}${rosterShowAllLeagues?' · showing all leagues':` in ${leagueName()}`}. Sign-in is First Last name + password (no email) — names must be unique.</p>
+  <div class="field" style="max-width:320px;margin-bottom:16px;">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:normal;">
+      <input type="checkbox" style="width:auto;" ${rosterShowAllLeagues?'checked':''} onchange="rosterShowAllLeagues=this.checked;render()">
+      Show players from all leagues (ignore league selection)
+    </label>
+  </div>
+  ${availabilitySummaryHTML(rosterForLeague(activeRoster()))}
   <div class="panel grid cols-2" style="margin-bottom:16px;">
     <div>
       <div class="field"><label>Add Player (First Last)</label><input id="newPlayerName" placeholder="e.g. Sam Whitfield"></div>
@@ -2068,6 +2093,7 @@ function openEditPlayer(id){
     gender: p.gender || null,
     rank: p.rank || 1,
     positions: [...(p.positions||[])],
+    leagues: [...(p.leagues||[])],
     availability: { ...(p.availability||{}) },
     injury_status: p.injury_status || 'green',
     vacations: (p.vacations||[]).map(v=>({...v})),
@@ -2083,6 +2109,13 @@ function closeEditPlayer(){
 function epTogglePos(pos){
   const i = editingDraft.positions.indexOf(pos);
   if(i>-1) editingDraft.positions.splice(i,1); else editingDraft.positions.push(pos);
+  render();
+}
+function epToggleLeague(code){
+  const list = [...(editingDraft.leagues||[])];
+  const i = list.indexOf(code);
+  if(i>-1) list.splice(i,1); else list.push(code);
+  editingDraft.leagues = list;
   render();
 }
 function epUpdateRank(v){
@@ -2139,6 +2172,7 @@ async function saveEditPlayer(){
     availability: editingDraft.availability, birthdate: editingDraft.birthdate,
     vacations: editingDraft.vacations, gender: editingDraft.gender,
     injury_status: editingDraft.injury_status, preferred_arenas: editingDraft.preferred_arenas,
+    leagues: editingDraft.leagues,
   }).eq('id', editingPlayerId);
   if(error){ showToast('Save failed: '+error.message); return; }
   showToast('Player profile saved ✓');
@@ -2172,6 +2206,12 @@ function renderEditPlayerModal(){
             <label>Positions</label>
             <div class="chips">
               ${POSITIONS.map(p=>`<div class="chip ${d.positions.includes(p)?'on':''}" onclick="epTogglePos('${p}')">${p}</div>`).join('')}
+            </div>
+          </div>
+          <div class="field">
+            <label>Leagues</label>
+            <div class="chips">
+              ${LEAGUES.map(([code,name])=>`<div class="chip ${(d.leagues||[]).includes(code)?'on':''}" onclick="epToggleLeague('${code}')" title="${name}">${code}</div>`).join('')}
             </div>
           </div>
         </div>
