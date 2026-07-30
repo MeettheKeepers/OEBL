@@ -354,6 +354,8 @@ let pushStatus = 'unknown'; // 'unsupported' | 'denied' | 'not-subscribed' | 'su
 let swRegistration = null;
 let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age' | 'gender'
 let rosterView = 'active'; // 'active' | 'archived'
+let editingPlayerId = null; // commissioner: profile id currently open in the edit-player modal
+let editingDraft = null;    // commissioner: working copy of that player's editable fields
 let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
 let searchFilters = { name:'', minAge:'', maxAge:'', minRank:1, maxRank:10, position:'any', status:'any' };
 let selectedPlayerIds = []; // player ids selected in Message Players tab
@@ -2029,7 +2031,7 @@ function renderRoster(){
       const unavailable = isOnVacation(p);
       const daysLeft = daysUntilArchive(p);
       return `<tr ${unavailable ? 'style="background:rgba(224,90,90,.16);"' : ''}>
-        <td>${p.name}${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}${unavailable?' <span class="tag" style="background:var(--danger);color:#fff;">UNAVAILABLE</span>':''}</td>
+        <td><a href="javascript:void(0)" onclick="openEditPlayer('${p.id}')" style="color:var(--teal);font-weight:600;text-decoration:underline;cursor:pointer;">${p.name}</a>${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}${unavailable?' <span class="tag" style="background:var(--danger);color:#fff;">UNAVAILABLE</span>':''}</td>
         <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
@@ -2053,6 +2055,177 @@ function renderRoster(){
       </tr>`;
     }).join('') : `<tr><td colspan="10" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
+  </div>
+  ${editingPlayerId ? renderEditPlayerModal() : ''}`;
+}
+function openEditPlayer(id){
+  const p = roster.find(r=>r.id===id);
+  if(!p) return;
+  editingPlayerId = id;
+  editingDraft = {
+    name: p.name || '',
+    birthdate: p.birthdate || null,
+    gender: p.gender || null,
+    rank: p.rank || 1,
+    positions: [...(p.positions||[])],
+    availability: { ...(p.availability||{}) },
+    injury_status: p.injury_status || 'green',
+    vacations: (p.vacations||[]).map(v=>({...v})),
+    preferred_arenas: JSON.parse(JSON.stringify(p.preferred_arenas||{})),
+  };
+  render();
+}
+function closeEditPlayer(){
+  editingPlayerId = null;
+  editingDraft = null;
+  render();
+}
+function epTogglePos(pos){
+  const i = editingDraft.positions.indexOf(pos);
+  if(i>-1) editingDraft.positions.splice(i,1); else editingDraft.positions.push(pos);
+  render();
+}
+function epUpdateRank(v){
+  editingDraft.rank = Number(v);
+  const el = document.getElementById('epRankNum');
+  if(el) el.textContent = v;
+}
+function epToggleDay(d){
+  if(editingDraft.availability[d] !== undefined){
+    const { [d]: _drop, ...rest } = editingDraft.availability;
+    editingDraft.availability = rest;
+  } else {
+    editingDraft.availability = { ...editingDraft.availability, [d]: '' };
+  }
+  render();
+}
+function epUpdateDayTime(d, val){
+  editingDraft.availability[d] = val;
+}
+function epAddVacation(){
+  const todayStr = new Date().toISOString().slice(0,10);
+  editingDraft.vacations = [...(editingDraft.vacations||[]), { start: todayStr, end: todayStr }];
+  render();
+}
+function epRemoveVacation(idx){
+  editingDraft.vacations = (editingDraft.vacations||[]).filter((_,i)=>i!==idx);
+  render();
+}
+function epUpdateVacation(idx, field, val){
+  const list = [...(editingDraft.vacations||[])];
+  list[idx] = { ...list[idx], [field]: val || null };
+  editingDraft.vacations = list;
+}
+function epArenaPrefList(){ return (editingDraft.preferred_arenas && editingDraft.preferred_arenas[activeLeague]) || []; }
+function epToggleArenaPref(id){
+  const cur = { ...(editingDraft.preferred_arenas||{}) };
+  const list = [...(cur[activeLeague]||[])];
+  const idx = list.indexOf(id);
+  if(idx>-1) list.splice(idx,1);
+  else {
+    if(list.length>=5){ showToast('You can rank up to 5 arenas'); return; }
+    list.push(id);
+  }
+  cur[activeLeague] = list;
+  editingDraft.preferred_arenas = cur;
+  render();
+}
+async function saveEditPlayer(){
+  if(!editingDraft || !editingPlayerId) return;
+  const nameEl = document.getElementById('epName');
+  if(nameEl) editingDraft.name = nameEl.value || editingDraft.name;
+  const { error } = await sb.from('profiles').update({
+    name: editingDraft.name, rank: editingDraft.rank, positions: editingDraft.positions,
+    availability: editingDraft.availability, birthdate: editingDraft.birthdate,
+    vacations: editingDraft.vacations, gender: editingDraft.gender,
+    injury_status: editingDraft.injury_status, preferred_arenas: editingDraft.preferred_arenas,
+  }).eq('id', editingPlayerId);
+  if(error){ showToast('Save failed: '+error.message); return; }
+  showToast('Player profile saved ✓');
+  editingPlayerId = null;
+  editingDraft = null;
+  await loadRoster();
+  render();
+}
+function renderEditPlayerModal(){
+  const d = editingDraft;
+  return `
+  <div style="position:fixed;inset:0;background:rgba(10,13,18,.6);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto;" onclick="if(event.target===this) closeEditPlayer()">
+    <div class="panel" style="max-width:640px;width:100%;margin:0;">
+      <div class="row-flex" style="margin-bottom:4px;">
+        <h2 class="section-title" style="margin-bottom:0;">Edit Player</h2>
+        <button class="btn ghost small" onclick="closeEditPlayer()">✕ Close</button>
+      </div>
+      <p class="section-sub">Editing ${d.name}'s profile as commissioner. Changes save immediately to their account.</p>
+
+      <div class="grid cols-2">
+        <div>
+          <div class="field"><label>Name</label><input id="epName" value="${d.name||''}" oninput="editingDraft.name=this.value"></div>
+          <div class="field"><label>Birthdate</label><input id="epBirthdate" type="date" value="${d.birthdate||''}" oninput="editingDraft.birthdate=this.value||null"></div>
+          <div class="field"><label>Gender</label>
+            <select id="epGender" onchange="editingDraft.gender=this.value||null">
+              <option value="" ${!d.gender?'selected':''}>— Not set —</option>
+              ${GENDERS.map(g=>`<option value="${g}" ${d.gender===g?'selected':''}>${g}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Positions</label>
+            <div class="chips">
+              ${POSITIONS.map(p=>`<div class="chip ${d.positions.includes(p)?'on':''}" onclick="epTogglePos('${p}')">${p}</div>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center;">
+          <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Ranking</label>
+          <div class="rank-display" id="epRankNum">${d.rank}</div>
+          <input type="range" min="1" max="10" value="${d.rank}" oninput="epUpdateRank(this.value)">
+          <div class="field" style="max-width:280px;margin:16px auto 0;text-align:left;">
+            <label>Injury Status</label>
+            <select id="epInjury" style="border-left:6px solid ${INJURY[d.injury_status||'green'].color};" onchange="editingDraft.injury_status=this.value">
+              ${Object.entries(INJURY).map(([k,v])=>`<option value="${k}" ${(d.injury_status||'green')===k?'selected':''}>${v.label}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
+        <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Days &amp; Times</h3>
+        <div class="chips">
+          ${DAYS.map(day=>`<div class="chip ${d.availability[day]!==undefined?'on':''}" onclick="epToggleDay('${day}')">${day}</div>`).join('')}
+        </div>
+        ${DAYS.filter(day=>d.availability[day]!==undefined).map(day=>`
+          <div class="field" style="max-width:320px;margin-top:12px;">
+            <label>Preferred time — ${day}</label>
+            <input value="${d.availability[day]||''}" placeholder="e.g. 7:00–9:00 PM" oninput="epUpdateDayTime('${day}', this.value)">
+          </div>`).join('')}
+      </div>
+
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
+        <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Vacation Mode</h3>
+        ${(d.vacations||[]).length ? d.vacations.map((v,idx)=>`
+          <div class="row-flex" style="align-items:flex-end;gap:10px;margin-bottom:10px;">
+            <div class="field" style="max-width:200px;margin:0;"><label>Start Date</label><input type="date" value="${v.start||''}" onchange="epUpdateVacation(${idx},'start',this.value)"></div>
+            <div class="field" style="max-width:200px;margin:0;"><label>End Date</label><input type="date" value="${v.end||''}" onchange="epUpdateVacation(${idx},'end',this.value)"></div>
+            <button class="btn ghost small" onclick="epRemoveVacation(${idx})">Remove</button>
+          </div>`).join('') : '<div class="hint" style="margin-bottom:10px;">No vacation dates set.</div>'}
+        <button class="btn ghost small" onclick="epAddVacation()">+ Add Vacation Period</button>
+      </div>
+
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
+        <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas — ${activeLeague}</h3>
+        <div class="chips">
+          ${arenas.length ? arenas.map(a=>{
+            const rank = epArenaPrefList().indexOf(a.id);
+            return `<div class="chip ${rank>-1?'on':''}" onclick="epToggleArenaPref('${a.id}')">${rank>-1?'#'+(rank+1)+' ':''}${a.name}</div>`;
+          }).join('') : '<span class="hint">No arenas set up yet for this league.</span>'}
+        </div>
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:10px;">
+        <button class="btn purple" onclick="saveEditPlayer()">Save Changes</button>
+        <button class="btn ghost" onclick="closeEditPlayer()">Cancel</button>
+      </div>
+    </div>
   </div>`;
 }
 async function addPlayer(){
