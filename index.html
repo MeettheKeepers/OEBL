@@ -313,7 +313,17 @@ const GOALIE_STATUS = {
   wanted: { label:'Goalie Wanted', color:'#e0c34f' },
   needed: { label:'Goalie Needed', color:'#e05a5a' },
 };
-const GENDERS = ['Male','Female','Other'];
+const GENDERS = ['Male','Female'];
+const SKILL_LEVELS = [['beginner','Beginner'],['intermediate','Intermediate'],['advanced','Advanced']];
+function skillLevelLabel(code){ const s = SKILL_LEVELS.find(x=>x[0]===code); return s ? s[1] : 'Not set'; }
+function skillLevelOrder(code){ const i = SKILL_LEVELS.findIndex(x=>x[0]===code); return i>-1 ? i+1 : 0; }
+function skillLevelRangeLabel(min, max){
+  if(!min && !max) return '';
+  if(min && max && min===max) return `${skillLevelLabel(min)} Game`;
+  if(min && max) return `${skillLevelLabel(min)}–${skillLevelLabel(max)} Game`;
+  if(min) return `${skillLevelLabel(min)}+ Game`;
+  return `Up to ${skillLevelLabel(max)} Game`;
+}
 function rateOptionsHTML(selectedCents){
   let html = '';
   for(let c=0;c<=10000;c+=500){
@@ -358,7 +368,7 @@ let rosterShowAllLeagues = false; // commissioner: bypass per-league filter and 
 let editingPlayerId = null; // commissioner: profile id currently open in the edit-player modal
 let editingDraft = null;    // commissioner: working copy of that player's editable fields
 let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
-let searchFilters = { name:'', minAge:'', maxAge:'', minRank:1, maxRank:10, position:'any', status:'any', gender:'any', league:'any' };
+let searchFilters = { name:'', minAge:'', maxAge:'', minSkill:'beginner', maxSkill:'advanced', position:'any', status:'any', gender:'any', league:'any' };
 let selectedPlayerIds = []; // player ids selected in Message Players tab
 
 /* ================= HELPERS ================= */
@@ -420,6 +430,11 @@ async function enterApp(sess){
   me.goalie_arenas = me.goalie_arenas || {};
   me.gender = me.gender || null;
   me.leagues = me.leagues || [];
+  me.skill_level = me.skill_level || null;
+  me.skill_level_locked = !!me.skill_level_locked;
+  me.bankroll_cents = me.bankroll_cents || 0;
+  me.contact_phone = me.contact_phone || '';
+  me.contact_email = me.contact_email || '';
   if(!me.is_commissioner && me.leagues.length && !me.leagues.includes(activeLeague)){
     activeLeague = me.leagues[0];
   }
@@ -780,10 +795,13 @@ function renderDashboard(){
     <div class="panel">
       <h3 style="margin-top:0;font-size:15px;color:var(--teal)">My Profile</h3>
       <div style="font-size:18px;font-weight:600;margin-bottom:6px;">${me.name}</div>
-      <div class="hint" style="margin-bottom:10px;">Skill Ranking: <span class="tag rank">${me.rank}</span></div>
+      <div class="hint" style="margin-bottom:10px;">Skill Level: <span class="tag rank">${skillLevelLabel(me.skill_level)}</span></div>
       <div class="chips">${(me.positions||[]).length ? me.positions.map(p=>`<span class="tag pos">${p}</span>`).join('') : '<span class="hint">No positions set yet</span>'}</div>
       <div class="hint" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
         Season Total: <strong style="color:var(--text)">${totalGoals} G · ${totalAssists} A · ${totalGoals+totalAssists} PTS</strong>
+      </div>
+      <div class="hint" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+        Bank Roll: <strong style="color:var(--text)">$${(me.bankroll_cents/100).toFixed(2)}</strong>
       </div>
     </div>
     <div class="panel">
@@ -810,7 +828,9 @@ function renderPlayerProfile(){
   <div class="panel grid cols-2">
     <div>
       <div class="field"><label>Name</label><input id="pName" value="${me.name||''}" oninput="me.name=this.value"></div>
-      <div class="field"><label>Email</label><input value="${me.email||''}" disabled></div>
+      <div class="field"><label>Login Email</label><input value="${me.email||''}" disabled></div>
+      <div class="field"><label>Contact Phone</label><input id="pPhone" type="tel" value="${me.contact_phone||''}" placeholder="e.g. 613-555-0123" oninput="me.contact_phone=this.value"></div>
+      <div class="field"><label>Contact Email</label><input id="pContactEmail" type="email" value="${me.contact_email||''}" placeholder="e.g. you@example.com" oninput="me.contact_email=this.value"></div>
       <div class="field"><label>Birthdate</label><input id="pBirthdate" type="date" value="${me.birthdate||''}" oninput="me.birthdate=this.value||null"></div>
       <div class="field"><label>Gender</label>
         <select id="pGender" onchange="me.gender=this.value||null">
@@ -834,10 +854,21 @@ function renderPlayerProfile(){
       <button class="btn purple" style="margin-top:10px" onclick="saveProfile()">Save Profile</button>
     </div>
     <div style="text-align:center;">
-      <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Ranking</label>
-      <div class="rank-display" id="rankNum">${me.rank}</div>
-      <div class="hint" style="margin-bottom:10px;">1 = just here for beers · 10 = should be in juniors</div>
-      <input type="range" min="1" max="10" value="${me.rank}" oninput="updateRank(this.value)">
+      <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Level</label>
+      <div class="rank-display" id="skillLevelDisplay" style="font-size:32px;">${skillLevelLabel(me.skill_level)}</div>
+      ${me.skill_level_locked ? `
+        <div class="hint" style="margin-bottom:10px;">Locked — only a commissioner can change this now.</div>
+      ` : `
+        <div class="chips" style="justify-content:center;margin-bottom:8px;">
+          ${SKILL_LEVELS.map(([code,label])=>`<div class="chip ${me.skill_level===code?'on':''}" onclick="chooseSkillLevel('${code}')">${label}</div>`).join('')}
+        </div>
+        <div class="hint" style="margin-bottom:10px;">Pick one and Save — it locks after that, and only a commissioner can change it.</div>
+      `}
+      <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--line);">
+        <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Bank Roll</label>
+        <div class="rank-display" style="font-size:32px;">$${(me.bankroll_cents/100).toFixed(2)}</div>
+        <div class="hint">Read-only — the commissioner adjusts this. It drops automatically when you commit to a paid game.</div>
+      </div>
     </div>
   </div>
   <div class="panel" style="margin-top:16px;">
@@ -923,9 +954,10 @@ function toggleDay(d){
 function updateDayTime(d, val){
   me.availability[d] = val;
 }
-function updateRank(v){
-  me.rank = Number(v);
-  document.getElementById('rankNum').textContent = v;
+function chooseSkillLevel(code){
+  if(me.skill_level_locked) return;
+  me.skill_level = code;
+  render();
 }
 async function updateInjury(v){
   me.injury_status = v;
@@ -969,12 +1001,23 @@ async function saveProfile(){
   if(birthdateEl) me.birthdate = birthdateEl.value || null;
   const genderEl = document.getElementById('pGender');
   if(genderEl) me.gender = genderEl.value || null;
-  const { error } = await sb.from('profiles').update({
-    name: me.name, rank: me.rank, positions: me.positions, availability: me.availability,
+  const phoneEl = document.getElementById('pPhone');
+  if(phoneEl) me.contact_phone = phoneEl.value;
+  const contactEmailEl = document.getElementById('pContactEmail');
+  if(contactEmailEl) me.contact_email = contactEmailEl.value;
+  const payload = {
+    name: me.name, positions: me.positions, availability: me.availability,
     birthdate: me.birthdate, vacations: me.vacations, gender: me.gender,
     preferred_arenas: me.preferred_arenas, leagues: me.leagues,
-  }).eq('id', me.id);
+    contact_phone: me.contact_phone, contact_email: me.contact_email,
+  };
+  if(!me.skill_level_locked && me.skill_level){
+    payload.skill_level = me.skill_level;
+    payload.skill_level_locked = true;
+  }
+  const { error } = await sb.from('profiles').update(payload).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
+  if(payload.skill_level_locked) me.skill_level_locked = true;
   document.getElementById('userName').textContent = me.name;
   await loadRoster();
   if(!me.is_commissioner && (me.leagues||[]).length && !me.leagues.includes(activeLeague)){
@@ -1203,16 +1246,19 @@ function renderIceTimes(){
   return `
   <h2 class="section-title">Upcoming Ice Times — ${activeLeague}</h2>
   <p class="section-sub">Pick the sessions you're in for in ${leagueName()}. Spots are first-come, first-served.</p>
+  <p class="section-sub">Bank Roll: <strong>$${(me.bankroll_cents/100).toFixed(2)}</strong></p>
   ${iceTimes.length ? iceTimes.map(s=>{
     const claimedFor = signups.filter(x=>x.ice_time_id===s.id);
     const pct = Math.round(claimedFor.length/s.max_spots*100);
     const inIt = claimedFor.some(x=>x.user_id===me.id);
+    const skillLabel = skillLevelRangeLabel(s.min_skill_level, s.max_skill_level);
     return `<div class="ice-card">
       <div>
         <div class="ice-date">${s.date_label} · ${s.time_label}</div>
         <div class="ice-loc">📍 ${s.location}</div>
         <div class="spots-bar"><div class="spots-fill" style="width:${pct}%"></div></div>
         <div class="hint">${claimedFor.length}/${s.max_spots} spots filled</div>
+        <div class="hint">${s.cost_cents!=null ? `Cost: $${(s.cost_cents/100).toFixed(2)}` : 'Free session'}${skillLabel?' · '+skillLabel:''}</div>
         <div class="hint">${s.referee_id ? 'Referee: '+(playerById(s.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
       </div>
       <button class="btn ${inIt?'danger':'purple'} small" onclick="toggleIce('${s.id}')">${inIt?'Leave':'Claim Spot'}</button>
@@ -1223,14 +1269,16 @@ function renderIceTimes(){
 async function toggleIce(id){
   const already = signups.find(x=>x.ice_time_id===id && x.user_id===me.id);
   if(already){
-    const { error } = await sb.from('ice_time_signups').delete().eq('id', already.id);
+    const { error } = await sb.rpc('release_ice_time_spot', { p_ice_time_id: id });
     if(error){ showToast('Failed: '+error.message); return; }
     showToast('Removed from session');
   } else {
-    const { error } = await sb.from('ice_time_signups').insert({ ice_time_id:id, user_id:me.id });
-    if(error){ showToast('Failed: '+error.message); return; }
+    const { error } = await sb.rpc('claim_ice_time_spot', { p_ice_time_id: id });
+    if(error){ showToast(error.message.replace(/^.*?:\s*/,'')); return; }
     showToast("You're in! ✓");
   }
+  const { data: freshMe } = await sb.from('profiles').select('bankroll_cents').eq('id', me.id).single();
+  if(freshMe) me.bankroll_cents = freshMe.bankroll_cents;
   await loadIceTimes();
   render();
 }
@@ -1535,7 +1583,7 @@ function linesScreen(editable){
         return `<div class="slot"><div class="pos-lbl">${label}</div>
           <select onchange="setLineSlot('${teamKey}','${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
       }
-      return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p?`<span class="tag rank">${p.rank}</span>`:''}</div>`;
+      return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p&&p.skill_level?`<span class="tag rank" title="${skillLevelLabel(p.skill_level)}">${skillLevelLabel(p.skill_level)[0]}</span>`:''}</div>`;
     };
     const body = defs.map(section=>`
       ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
@@ -1736,6 +1784,21 @@ function renderPostIce(){
       <div class="field"><label>Date</label><input id="newDate" type="date" value="${editGame?editGame.game_date:''}"></div>
       <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM" value="${editGame?(editGame.time_label||''):''}"></div>
       <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="${editGame?editGame.max_spots:18}"></div>
+      <div class="field"><label>Cost to Play ($)</label><input id="newCost" type="number" min="0" step="0.01" placeholder="e.g. 15" value="${editGame && editGame.cost_cents!=null ? (editGame.cost_cents/100).toFixed(2) : ''}"></div>
+      <div class="hint" style="margin-top:-8px;margin-bottom:14px;">Leave blank for a free session. Deducted from a player's bank roll the moment they claim a spot.</div>
+      <div class="field"><label>Min Skill Level Required</label>
+        <select id="newMinSkill">
+          <option value="" ${!(editGame && editGame.min_skill_level)?'selected':''}>Any</option>
+          ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${editGame && editGame.min_skill_level===code?'selected':''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Max Skill Level Required</label>
+        <select id="newMaxSkill">
+          <option value="" ${!(editGame && editGame.max_skill_level)?'selected':''}>Any</option>
+          ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${editGame && editGame.max_skill_level===code?'selected':''}>${label}</option>`).join('')}
+        </select>
+        <div class="hint">Labels the game as a Beginner/Intermediate/Advanced session — informational only for now, doesn't block sign-ups.</div>
+      </div>
       <div class="field"><label>Roster Format (for lines)</label>
         <select id="newFormat">
           ${Object.entries(GAME_FORMATS).map(([k,f])=>`<option value="${k}" ${editGame && formatKeyFor(editGame)===k?'selected':''}>${f.label}</option>`).join('')}
@@ -1815,10 +1878,15 @@ function renderPostIce(){
         const rs = REF_STATUS[s.ref_status||'none'];
         const goalieName = s.goalie_id ? (playerById(s.goalie_id)?.name||'Assigned') : 'Unassigned';
         const gs = GOALIE_STATUS[s.goalie_status||'none'];
+        const skillLabel = skillLevelRangeLabel(s.min_skill_level, s.max_skill_level);
         return `<div class="panel" style="margin-bottom:10px;padding:14px 16px;">
         <div class="row-flex" style="margin-bottom:8px;flex-wrap:wrap;">
           <strong style="font-size:13px;">${s.date_label} — ${s.location}</strong>
           <span class="hint">${n}/${s.max_spots} spots filled</span>
+        </div>
+        <div class="hint" style="margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+          ${s.cost_cents!=null ? `<span class="tag">Cost: $${(s.cost_cents/100).toFixed(2)}</span>` : ''}
+          ${skillLabel ? `<span class="tag pos">${skillLabel}</span>` : ''}
         </div>
         <div class="hint" style="margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
           <span>Ref: ${refName}</span>
@@ -1873,8 +1941,12 @@ async function postIce(){
   const rankMaxEl = document.getElementById('newGoalieRankMax');
   const goalie_rank_min = (rankOn && rankMinEl.value !== '') ? Number(rankMinEl.value) : null;
   const goalie_rank_max = (rankOn && rankMaxEl.value !== '') ? Number(rankMaxEl.value) : null;
+  const costEl = document.getElementById('newCost');
+  const cost_cents = (costEl && costEl.value !== '') ? Math.round(Number(costEl.value)*100) : null;
+  const min_skill_level = document.getElementById('newMinSkill').value || null;
+  const max_skill_level = document.getElementById('newMaxSkill').value || null;
   const payload = {
-    date_label, game_date, time_label, location, max_spots,
+    date_label, game_date, time_label, location, max_spots, cost_cents, min_skill_level, max_skill_level,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
     goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_rank_min, goalie_rank_max,
   };
@@ -1997,7 +2069,7 @@ function daysUntilArchive(p){
 }
 function sortedRoster(list){
   const arr = [...list];
-  if(rosterSort==='rank') arr.sort((a,b)=> b.rank-a.rank);
+  if(rosterSort==='rank') arr.sort((a,b)=> skillLevelOrder(b.skill_level)-skillLevelOrder(a.skill_level));
   else if(rosterSort==='games') arr.sort((a,b)=> gamesPlayed(b)-gamesPlayed(a));
   else if(rosterSort==='age'){
     arr.sort((a,b)=>{
@@ -2059,7 +2131,7 @@ function renderRoster(){
     <div class="field" style="max-width:220px;margin:0;">
       <select onchange="rosterSort=this.value;render()">
         <option value="name" ${rosterSort==='name'?'selected':''}>Sort: Name</option>
-        <option value="rank" ${rosterSort==='rank'?'selected':''}>Sort: Rank</option>
+        <option value="rank" ${rosterSort==='rank'?'selected':''}>Sort: Skill Level</option>
         <option value="games" ${rosterSort==='games'?'selected':''}>Sort: Games Played</option>
         <option value="age" ${rosterSort==='age'?'selected':''}>Sort: Age</option>
         <option value="gender" ${rosterSort==='gender'?'selected':''}>Sort: Gender</option>
@@ -2069,7 +2141,7 @@ function renderRoster(){
   </div>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Rank</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
       const inj = INJURY[p.injury_status||'green'];
       const age = calcAge(p.birthdate);
@@ -2077,7 +2149,11 @@ function renderRoster(){
       const daysLeft = daysUntilArchive(p);
       return `<tr ${unavailable ? 'style="background:rgba(224,90,90,.16);"' : ''}>
         <td><a href="javascript:void(0)" onclick="openEditPlayer('${p.id}')" style="color:var(--teal);font-weight:600;text-decoration:underline;cursor:pointer;">${p.name}</a>${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}${unavailable?' <span class="tag" style="background:var(--danger);color:#fff;">UNAVAILABLE</span>':''}</td>
-        <td><select style="width:64px;" onchange="updatePlayerRank('${p.id}',this.value)">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${n===p.rank?'selected':''}>${n}</option>`).join('')}</select></td>
+        <td><select style="width:120px;" onchange="updatePlayerSkillLevel('${p.id}',this.value)">
+          <option value="" ${!p.skill_level?'selected':''}>Not set</option>
+          ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${p.skill_level===code?'selected':''}>${label}</option>`).join('')}
+        </select></td>
+        <td><input type="number" step="0.01" style="width:80px;" value="${(p.bankroll_cents/100).toFixed(2)}" onchange="updatePlayerBankroll('${p.id}',this.value)"></td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
         <td>${(p.leagues||[]).length ? (p.leagues||[]).map(l=>`<span class="tag pos">${l}</span>`).join('') : '<span class="hint">—</span>'}</td>
@@ -2099,7 +2175,7 @@ function renderRoster(){
           `}
         </td>
       </tr>`;
-    }).join('') : `<tr><td colspan="11" class="empty">No ${rosterView} players.</td></tr>`}
+    }).join('') : `<tr><td colspan="12" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
   </div>
   ${editingPlayerId ? renderEditPlayerModal() : ''}`;
@@ -2112,7 +2188,10 @@ function openEditPlayer(id){
     name: p.name || '',
     birthdate: p.birthdate || null,
     gender: p.gender || null,
-    rank: p.rank || 1,
+    skill_level: p.skill_level || null,
+    bankroll_cents: p.bankroll_cents || 0,
+    contact_phone: p.contact_phone || '',
+    contact_email: p.contact_email || '',
     positions: [...(p.positions||[])],
     leagues: [...(p.leagues||[])],
     availability: { ...(p.availability||{}) },
@@ -2139,10 +2218,13 @@ function epToggleLeague(code){
   editingDraft.leagues = list;
   render();
 }
-function epUpdateRank(v){
-  editingDraft.rank = Number(v);
-  const el = document.getElementById('epRankNum');
-  if(el) el.textContent = v;
+function epChooseSkillLevel(code){
+  editingDraft.skill_level = code;
+  render();
+}
+function epResetSkillLevel(){
+  editingDraft.skill_level = null;
+  render();
 }
 function epToggleDay(d){
   if(editingDraft.availability[d] !== undefined){
@@ -2188,12 +2270,20 @@ async function saveEditPlayer(){
   if(!editingDraft || !editingPlayerId) return;
   const nameEl = document.getElementById('epName');
   if(nameEl) editingDraft.name = nameEl.value || editingDraft.name;
+  const phoneEl = document.getElementById('epPhone');
+  if(phoneEl) editingDraft.contact_phone = phoneEl.value;
+  const contactEmailEl = document.getElementById('epContactEmail');
+  if(contactEmailEl) editingDraft.contact_email = contactEmailEl.value;
+  const bankrollEl = document.getElementById('epBankroll');
+  const bankroll_cents = bankrollEl ? (Math.round(Number(bankrollEl.value)*100) || 0) : editingDraft.bankroll_cents;
   const { error } = await sb.from('profiles').update({
-    name: editingDraft.name, rank: editingDraft.rank, positions: editingDraft.positions,
+    name: editingDraft.name, positions: editingDraft.positions,
     availability: editingDraft.availability, birthdate: editingDraft.birthdate,
     vacations: editingDraft.vacations, gender: editingDraft.gender,
     injury_status: editingDraft.injury_status, preferred_arenas: editingDraft.preferred_arenas,
     leagues: editingDraft.leagues,
+    skill_level: editingDraft.skill_level, skill_level_locked: !!editingDraft.skill_level,
+    bankroll_cents, contact_phone: editingDraft.contact_phone, contact_email: editingDraft.contact_email,
   }).eq('id', editingPlayerId);
   if(error){ showToast('Save failed: '+error.message); return; }
   showToast('Player profile saved ✓');
@@ -2216,6 +2306,8 @@ function renderEditPlayerModal(){
       <div class="grid cols-2">
         <div>
           <div class="field"><label>Name</label><input id="epName" value="${d.name||''}" oninput="editingDraft.name=this.value"></div>
+          <div class="field"><label>Contact Phone</label><input id="epPhone" type="tel" value="${d.contact_phone||''}" oninput="editingDraft.contact_phone=this.value"></div>
+          <div class="field"><label>Contact Email</label><input id="epContactEmail" type="email" value="${d.contact_email||''}" oninput="editingDraft.contact_email=this.value"></div>
           <div class="field"><label>Birthdate</label><input id="epBirthdate" type="date" value="${d.birthdate||''}" oninput="editingDraft.birthdate=this.value||null"></div>
           <div class="field"><label>Gender</label>
             <select id="epGender" onchange="editingDraft.gender=this.value||null">
@@ -2237,9 +2329,16 @@ function renderEditPlayerModal(){
           </div>
         </div>
         <div style="text-align:center;">
-          <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Ranking</label>
-          <div class="rank-display" id="epRankNum">${d.rank}</div>
-          <input type="range" min="1" max="10" value="${d.rank}" oninput="epUpdateRank(this.value)">
+          <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Level</label>
+          <div class="rank-display" id="epSkillLevelDisplay" style="font-size:28px;">${skillLevelLabel(d.skill_level)}</div>
+          <div class="chips" style="justify-content:center;margin-bottom:6px;">
+            ${SKILL_LEVELS.map(([code,label])=>`<div class="chip ${d.skill_level===code?'on':''}" onclick="epChooseSkillLevel('${code}')">${label}</div>`).join('')}
+          </div>
+          <button class="btn ghost small" onclick="epResetSkillLevel()">Clear (let player pick again)</button>
+          <div class="field" style="max-width:280px;margin:16px auto 0;text-align:left;">
+            <label>Bank Roll ($)</label>
+            <input id="epBankroll" type="number" step="0.01" value="${(d.bankroll_cents/100).toFixed(2)}">
+          </div>
           <div class="field" style="max-width:280px;margin:16px auto 0;text-align:left;">
             <label>Injury Status</label>
             <select id="epInjury" style="border-left:6px solid ${INJURY[d.injury_status||'green'].color};" onchange="editingDraft.injury_status=this.value">
@@ -2305,11 +2404,18 @@ async function promoteToggle(id, makeCommish){
   await loadRoster();
   render();
 }
-async function updatePlayerRank(id, val){
-  const { error } = await sb.from('profiles').update({ rank: Number(val) }).eq('id', id);
+async function updatePlayerSkillLevel(id, val){
+  const { error } = await sb.from('profiles').update({ skill_level: val || null, skill_level_locked: !!val }).eq('id', id);
   if(error){ showToast('Failed: '+error.message); return; }
   await loadRoster();
-  showToast('Rank updated ✓');
+  showToast('Skill level updated ✓');
+}
+async function updatePlayerBankroll(id, val){
+  const cents = Math.round(Number(val)*100) || 0;
+  const { error } = await sb.from('profiles').update({ bankroll_cents: cents }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadRoster();
+  showToast('Bank roll updated ✓');
 }
 async function resetPassword(id, name){
   const pw = prompt(`New password for ${name}:`);
@@ -2423,7 +2529,10 @@ function filteredPlayersForMessage(){
     const age = calcAge(p.birthdate);
     if(searchFilters.minAge!=='' && searchFilters.minAge!==null && (age===null || age < Number(searchFilters.minAge))) return false;
     if(searchFilters.maxAge!=='' && searchFilters.maxAge!==null && (age===null || age > Number(searchFilters.maxAge))) return false;
-    if(p.rank < Number(searchFilters.minRank) || p.rank > Number(searchFilters.maxRank)) return false;
+    if(searchFilters.minSkill!=='beginner' || searchFilters.maxSkill!=='advanced'){
+      const lvl = skillLevelOrder(p.skill_level);
+      if(!lvl || lvl < skillLevelOrder(searchFilters.minSkill) || lvl > skillLevelOrder(searchFilters.maxSkill)) return false;
+    }
     if(searchFilters.position!=='any' && !(p.positions||[]).includes(searchFilters.position)) return false;
     if(searchFilters.status==='vacation' && !isOnVacation(p)) return false;
     if(searchFilters.status==='red' && p.injury_status!=='red') return false;
@@ -2463,8 +2572,12 @@ function renderMessagePlayers(){
     </select></div>
     <div class="field"><label>Min Age</label><input type="number" value="${searchFilters.minAge}" oninput="updateSearchFilter('minAge',this.value)"></div>
     <div class="field"><label>Max Age</label><input type="number" value="${searchFilters.maxAge}" oninput="updateSearchFilter('maxAge',this.value)"></div>
-    <div class="field"><label>Min Rank</label><input type="number" min="1" max="10" value="${searchFilters.minRank}" oninput="updateSearchFilter('minRank',this.value)"></div>
-    <div class="field"><label>Max Rank</label><input type="number" min="1" max="10" value="${searchFilters.maxRank}" oninput="updateSearchFilter('maxRank',this.value)"></div>
+    <div class="field"><label>Min Skill Level</label><select onchange="updateSearchFilter('minSkill',this.value)">
+      ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${searchFilters.minSkill===code?'selected':''}>${label}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Max Skill Level</label><select onchange="updateSearchFilter('maxSkill',this.value)">
+      ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${searchFilters.maxSkill===code?'selected':''}>${label}</option>`).join('')}
+    </select></div>
     <div class="field"><label>Position</label><select onchange="updateSearchFilter('position',this.value)">
       <option value="any" ${searchFilters.position==='any'?'selected':''}>Any</option>
       ${POSITIONS.map(p=>`<option value="${p}" ${searchFilters.position===p?'selected':''}>${p}</option>`).join('')}
@@ -2492,7 +2605,7 @@ function renderMessagePlayers(){
       const selected = selectedPlayerIds.includes(p.id);
       return `<div class="player-card ${selected?'selected':''} ${unavailable?'unavailable':''}" onclick="toggleSelectPlayer('${p.id}')">
         <div class="pc-name">${p.name}${unavailable?' <span class="tag" style="background:var(--danger);color:#fff;">UNAVAILABLE</span>':''}</div>
-        <div class="pc-meta">Rank ${p.rank} · ${age!==null?age+' yrs':'age n/a'}</div>
+        <div class="pc-meta">${skillLevelLabel(p.skill_level)} · ${age!==null?age+' yrs':'age n/a'}</div>
         <div class="pc-meta" style="margin-top:6px;"><span class="tag" style="background:${inj.color};color:#04241a;">${(p.injury_status||'green').toUpperCase()}</span></div>
       </div>`;
     }).join('') : '<div class="empty">No players match these filters.</div>'}
