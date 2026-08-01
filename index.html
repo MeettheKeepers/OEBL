@@ -432,6 +432,10 @@ async function enterApp(sess){
   me.leagues = me.leagues || [];
   me.skill_level = me.skill_level || null;
   me.skill_level_locked = !!me.skill_level_locked;
+  me.referee_skill_level = me.referee_skill_level || null;
+  me.referee_skill_level_locked = !!me.referee_skill_level_locked;
+  me.goalie_skill_level = me.goalie_skill_level || null;
+  me.goalie_skill_level_locked = !!me.goalie_skill_level_locked;
   me.bankroll_cents = me.bankroll_cents || 0;
   me.contact_phone = me.contact_phone || '';
   me.contact_email = me.contact_email || '';
@@ -647,16 +651,18 @@ async function loadRoster(){
   roster = data || [];
 }
 async function loadIceTimes(){
-  const [{ data: its }, { data: sus }, { data: wl }, { data: gwl }] = await Promise.all([
+  const [{ data: its }, { data: sus }, { data: wl }, { data: gwl }, { data: fal }] = await Promise.all([
     sb.from('ice_times').select('*').eq('league_id', activeLeague).eq('archived', false).order('game_date'),
     sb.from('ice_time_signups').select('*'),
     sb.from('referee_waitlist').select('*'),
     sb.from('goalie_waitlist').select('*'),
+    sb.from('ice_time_waitlist').select('*'),
   ]);
   iceTimes = its || [];
   signups = sus || [];
   refWaitlist = wl || [];
   goalieWaitlist = gwl || [];
+  freeAgentList = fal || [];
   if(activeGameId && !iceTimes.find(g=>g.id===activeGameId)) activeGameId = null;
   if(iceTimes.length && !activeGameId) activeGameId = iceTimes[0].id;
   if(activeGameId) await loadLines(activeGameId);
@@ -679,6 +685,7 @@ async function loadLines(gameId){
 let refWaitlist = []; // referee_waitlist rows (all — small table, filtered client-side)
 let refPhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
 let goalieWaitlist = []; // goalie_waitlist rows (all — small table, filtered client-side)
+let freeAgentList = []; // ice_time_waitlist rows (all — small table, filtered client-side)
 let goaliePhones = {}; // user_id -> phone (RLS returns only what the viewer is allowed to see)
 let pastGames = [];       // archived ice_times rows (commissioner Past Games tab)
 let activePastGameId = null;
@@ -1053,9 +1060,10 @@ function updateRefArenaPrice(arenaId, val){
   cur[activeLeague] = list;
   me.referee_arenas = cur;
 }
-function updateRefSkill(v){
-  me.referee_skill = Number(v);
-  document.getElementById('refSkillNum').textContent = v;
+function chooseRefSkillLevel(code){
+  if(me.referee_skill_level_locked) return;
+  me.referee_skill_level = code;
+  render();
 }
 function renderRefereeProfile(){
   return `
@@ -1064,9 +1072,15 @@ function renderRefereeProfile(){
   <div class="panel grid cols-2">
     <div style="text-align:center;">
       <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Referee Skill Level</label>
-      <div class="rank-display" id="refSkillNum">${me.referee_skill}</div>
-      <div class="hint" style="margin-bottom:10px;">1 = brand new · 10 = could work playoffs</div>
-      <input type="range" min="1" max="10" value="${me.referee_skill}" oninput="updateRefSkill(this.value)">
+      <div class="rank-display" style="font-size:32px;">${skillLevelLabel(me.referee_skill_level)}</div>
+      ${me.referee_skill_level_locked ? `
+        <div class="hint" style="margin-bottom:10px;">Locked — only a commissioner can change this now.</div>
+      ` : `
+        <div class="chips" style="justify-content:center;margin-bottom:8px;">
+          ${SKILL_LEVELS.map(([code,label])=>`<div class="chip ${me.referee_skill_level===code?'on':''}" onclick="chooseRefSkillLevel('${code}')">${label}</div>`).join('')}
+        </div>
+        <div class="hint" style="margin-bottom:10px;">Pick one and Save — it locks after that, and only a commissioner can change it.</div>
+      `}
     </div>
     <div>
       <div class="field"><label>Hourly Rate ($)</label><input type="number" min="0" step="1" id="refHourly" value="${me.referee_hourly_cents!=null?(me.referee_hourly_cents/100).toFixed(0):''}" placeholder="e.g. 50" oninput="me.referee_hourly_cents=this.value!==''?Math.round(Number(this.value)*100):null"></div>
@@ -1115,14 +1129,19 @@ async function saveRefereeProfile(){
   if(hourlyEl) me.referee_hourly_cents = hourlyEl.value !== '' ? Math.round(Number(hourlyEl.value)*100) : null;
   if(experienceEl) me.referee_experience = experienceEl.value;
   const phone = phoneEl ? phoneEl.value.trim() : (me.refereePhone||'');
-  const { error } = await sb.from('profiles').update({
-    referee_skill: me.referee_skill,
+  const payload = {
     referee_hourly_cents: me.referee_hourly_cents,
     referee_experience: me.referee_experience,
     referee_arenas: me.referee_arenas,
     availability: me.availability,
-  }).eq('id', me.id);
+  };
+  if(!me.referee_skill_level_locked && me.referee_skill_level){
+    payload.referee_skill_level = me.referee_skill_level;
+    payload.referee_skill_level_locked = true;
+  }
+  const { error } = await sb.from('profiles').update(payload).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
+  if(payload.referee_skill_level_locked) me.referee_skill_level_locked = true;
   const { error: phoneErr } = await sb.from('referee_phones').upsert(
     { user_id: me.id, phone, updated_at: new Date().toISOString() }, { onConflict:'user_id' }
   );
@@ -1156,9 +1175,10 @@ function updateGoalieArenaPrice(arenaId, val){
   cur[activeLeague] = list;
   me.goalie_arenas = cur;
 }
-function updateGoalieSkill(v){
-  me.goalie_skill = Number(v);
-  document.getElementById('goalieSkillNum').textContent = v;
+function chooseGoalieSkillLevel(code){
+  if(me.goalie_skill_level_locked) return;
+  me.goalie_skill_level = code;
+  render();
 }
 function renderGoalieProfile(){
   return `
@@ -1167,9 +1187,15 @@ function renderGoalieProfile(){
   <div class="panel grid cols-2">
     <div style="text-align:center;">
       <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Goalie Skill Level</label>
-      <div class="rank-display" id="goalieSkillNum">${me.goalie_skill}</div>
-      <div class="hint" style="margin-bottom:10px;">1 = brand new · 10 = could work playoffs</div>
-      <input type="range" min="1" max="10" value="${me.goalie_skill}" oninput="updateGoalieSkill(this.value)">
+      <div class="rank-display" style="font-size:32px;">${skillLevelLabel(me.goalie_skill_level)}</div>
+      ${me.goalie_skill_level_locked ? `
+        <div class="hint" style="margin-bottom:10px;">Locked — only a commissioner can change this now.</div>
+      ` : `
+        <div class="chips" style="justify-content:center;margin-bottom:8px;">
+          ${SKILL_LEVELS.map(([code,label])=>`<div class="chip ${me.goalie_skill_level===code?'on':''}" onclick="chooseGoalieSkillLevel('${code}')">${label}</div>`).join('')}
+        </div>
+        <div class="hint" style="margin-bottom:10px;">Pick one and Save — it locks after that, and only a commissioner can change it.</div>
+      `}
     </div>
     <div>
       <div class="field"><label>Hourly Rate ($)</label>
@@ -1225,14 +1251,19 @@ async function saveGoalieProfile(){
   if(hourlyEl) me.goalie_hourly_cents = hourlyEl.value !== '' ? Number(hourlyEl.value) : null;
   if(experienceEl) me.goalie_experience = experienceEl.value;
   const phone = phoneEl ? phoneEl.value.trim() : (me.goaliePhone||'');
-  const { error } = await sb.from('profiles').update({
-    goalie_skill: me.goalie_skill,
+  const payload = {
     goalie_hourly_cents: me.goalie_hourly_cents,
     goalie_experience: me.goalie_experience,
     goalie_arenas: me.goalie_arenas,
     availability: me.availability,
-  }).eq('id', me.id);
+  };
+  if(!me.goalie_skill_level_locked && me.goalie_skill_level){
+    payload.goalie_skill_level = me.goalie_skill_level;
+    payload.goalie_skill_level_locked = true;
+  }
+  const { error } = await sb.from('profiles').update(payload).eq('id', me.id);
   if(error){ showToast('Save failed: '+error.message); return; }
+  if(payload.goalie_skill_level_locked) me.goalie_skill_level_locked = true;
   const { error: phoneErr } = await sb.from('goalie_phones').upsert(
     { user_id: me.id, phone, updated_at: new Date().toISOString() }, { onConflict:'user_id' }
   );
@@ -1258,6 +1289,7 @@ function positionBreakdown(it){
     goalie: { filled: filled('goalie'), cap: cap('goalie') },
   };
 }
+function freeAgentListFor(iceTimeId){ return freeAgentList.filter(w=>w.ice_time_id===iceTimeId); }
 function renderIceTimes(){
   return `
   <h2 class="section-title">Upcoming Ice Times — ${activeLeague}</h2>
@@ -1269,27 +1301,57 @@ function renderIceTimes(){
     const inIt = claimedFor.some(x=>x.user_id===me.id);
     const skillLabel = skillLevelRangeLabel(s.min_skill_level, s.max_skill_level);
     const bd = positionBreakdown(s);
+    const isFull = claimedFor.length >= s.max_spots;
+    const fal = freeAgentListFor(s.id);
+    const onFal = fal.some(w=>w.user_id===me.id);
+    let actionHTML;
+    if(inIt){
+      actionHTML = `<button class="btn danger small" onclick="toggleIce('${s.id}')">Leave</button>`;
+    } else if(isFull){
+      actionHTML = onFal
+        ? `<button class="btn ghost small" onclick="leaveIceTimeWaitlist('${s.id}')">Leave Free Agent List</button>`
+        : `<button class="btn purple small" onclick="joinIceTimeWaitlist('${s.id}')">Join Free Agent List</button>`;
+    } else {
+      actionHTML = `<button class="btn purple small" onclick="toggleIce('${s.id}')">Claim Spot</button>`;
+    }
     return `<div class="ice-card">
       <div>
         <div class="ice-date">${s.date_label} · ${s.time_label}</div>
         <div class="ice-loc">📍 ${s.location}</div>
         <div class="spots-bar"><div class="spots-fill" style="width:${pct}%"></div></div>
-        <div class="hint">${claimedFor.length}/${s.max_spots} spots filled</div>
+        <div class="hint">${claimedFor.length}/${s.max_spots} spots filled${isFull && fal.length ? ` · ${fal.length} on Free Agent List${onFal?' (you included)':''}` : ''}</div>
         <div class="hint">${bd.forward.filled}/${bd.forward.cap} forwards · ${bd.defense.filled}/${bd.defense.cap} defense · ${bd.goalie.filled}/${bd.goalie.cap} goalies filled</div>
         <div class="hint">${s.cost_cents!=null ? `Cost: $${(s.cost_cents/100).toFixed(2)}` : 'Free session'}${skillLabel?' · '+skillLabel:''}</div>
         <div class="hint">${s.referee_id ? 'Referee: '+(playerById(s.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
       </div>
-      <button class="btn ${inIt?'danger':'purple'} small" onclick="toggleIce('${s.id}')">${inIt?'Leave':'Claim Spot'}</button>
+      ${actionHTML}
     </div>`;
   }).join('') : '<div class="empty">No ice times posted yet.</div>'}
   `;
 }
+async function joinIceTimeWaitlist(id){
+  const { error } = await sb.rpc('join_ice_time_waitlist', { p_ice_time_id: id });
+  if(error){ showToast(error.message.replace(/^.*?:\s*/,'')); return; }
+  showToast("You're on the Free Agent List ✓");
+  await loadIceTimes();
+  render();
+}
+async function leaveIceTimeWaitlist(id){
+  const { error } = await sb.from('ice_time_waitlist').delete().eq('ice_time_id', id).eq('user_id', me.id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Left Free Agent List');
+  await loadIceTimes();
+  render();
+}
 async function toggleIce(id){
   const already = signups.find(x=>x.ice_time_id===id && x.user_id===me.id);
   if(already){
-    const { error } = await sb.rpc('release_ice_time_spot', { p_ice_time_id: id });
+    const { data, error } = await sb.rpc('release_ice_time_spot', { p_ice_time_id: id });
     if(error){ showToast('Failed: '+error.message); return; }
     showToast('Removed from session');
+    if(data && data.promoted_user_id){
+      callAdmin('notify-waitlist-promotion', { ice_time_id: id, user_id: data.promoted_user_id }).catch(()=>{});
+    }
   } else {
     const { data, error } = await sb.rpc('claim_ice_time_spot', { p_ice_time_id: id });
     if(error){ showToast(error.message.replace(/^.*?:\s*/,'')); return; }
@@ -1391,7 +1453,7 @@ function renderRefRoster(){
     const assignedGames = iceTimes.filter(it=>it.referee_id===p.id);
     return `<div class="player-card">
       <div class="pc-name">${p.name}</div>
-      <div class="pc-meta">Skill ${p.referee_skill||5}/10 · ${hourly}</div>
+      <div class="pc-meta">Skill: ${skillLevelLabel(p.referee_skill_level)} · ${hourly}</div>
       <div class="pc-meta" style="margin-top:6px;">${arenaText}</div>
       <div class="pc-meta" style="margin-top:6px;">${(p.referee_experience||'').trim() || 'No experience listed'}</div>
       <div class="pc-meta" style="margin-top:6px;">${availabilitySummary(p)}</div>
@@ -1458,9 +1520,9 @@ function renderGoalieDashboard(){
       reqBits.push(`${it.goalie_count||1} needed`);
       reqBits.push(`Gender: ${it.goalie_gender_pref||'Any'}`);
       reqBits.push(`Caliber: ${it.goalie_caliber||'Any'}`);
-      const rMin = it.goalie_rank_min, rMax = it.goalie_rank_max;
-      const rankText = (rMin!=null && rMax!=null) ? `${rMin}–${rMax}` : rMin!=null ? `${rMin}+` : rMax!=null ? `up to ${rMax}` : 'Any';
-      reqBits.push(`Rank: ${rankText}`);
+      const rMin = it.goalie_min_skill_level, rMax = it.goalie_max_skill_level;
+      const rankText = (rMin && rMax) ? (rMin===rMax ? skillLevelLabel(rMin) : `${skillLevelLabel(rMin)}–${skillLevelLabel(rMax)}`) : rMin ? `${skillLevelLabel(rMin)}+` : rMax ? `Up to ${skillLevelLabel(rMax)}` : 'Any';
+      reqBits.push(`Skill: ${rankText}`);
     }
     return `<div class="ice-card" style="border-left:6px solid ${gs.color};">
       <div>
@@ -1521,7 +1583,7 @@ function renderGoalieRoster(){
     const assignedGames = iceTimes.filter(it=>it.goalie_id===p.id);
     return `<div class="player-card">
       <div class="pc-name">${p.name}</div>
-      <div class="pc-meta">Skill ${p.goalie_skill||5}/10 · ${hourly}</div>
+      <div class="pc-meta">Skill: ${skillLevelLabel(p.goalie_skill_level)} · ${hourly}</div>
       <div class="pc-meta" style="margin-top:6px;">${arenaText}</div>
       <div class="pc-meta" style="margin-top:6px;">${(p.goalie_experience||'').trim() || 'No experience listed'}</div>
       <div class="pc-meta" style="margin-top:6px;">${availabilitySummary(p)}</div>
@@ -1870,25 +1932,25 @@ function renderPostIce(){
           </select>
         </div>
         <div class="field">
-          <label>Specific Rank Requirement</label>
-          <div><button type="button" class="chip ${editGame && (editGame.goalie_rank_min!=null||editGame.goalie_rank_max!=null)?'on':''}" id="rankReqToggle" onclick="toggleGoalieRankReq(this)">Looking for X ranked goalie</button></div>
-          <div id="goalieRankWrap" style="display:${editGame && (editGame.goalie_rank_min!=null||editGame.goalie_rank_max!=null)?'flex':'none'};gap:14px;margin-top:8px;">
+          <label>Specific Skill Level Requirement</label>
+          <div><button type="button" class="chip ${editGame && (editGame.goalie_min_skill_level!=null||editGame.goalie_max_skill_level!=null)?'on':''}" id="rankReqToggle" onclick="toggleGoalieRankReq(this)">Looking for X skill goalie</button></div>
+          <div id="goalieRankWrap" style="display:${editGame && (editGame.goalie_min_skill_level!=null||editGame.goalie_max_skill_level!=null)?'flex':'none'};gap:14px;margin-top:8px;">
             <div>
-              <label class="hint" style="display:block;margin-bottom:4px;">Minimum Rank</label>
+              <label class="hint" style="display:block;margin-bottom:4px;">Minimum Skill Level</label>
               <select id="newGoalieRankMin">
-                <option value="" ${!(editGame && editGame.goalie_rank_min!=null)?'selected':''}>Any</option>
-                ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${editGame && editGame.goalie_rank_min===n?'selected':''}>${n}</option>`).join('')}
+                <option value="" ${!(editGame && editGame.goalie_min_skill_level)?'selected':''}>Any</option>
+                ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${editGame && editGame.goalie_min_skill_level===code?'selected':''}>${label}</option>`).join('')}
               </select>
             </div>
             <div>
-              <label class="hint" style="display:block;margin-bottom:4px;">Maximum Rank</label>
+              <label class="hint" style="display:block;margin-bottom:4px;">Maximum Skill Level</label>
               <select id="newGoalieRankMax">
-                <option value="" ${!(editGame && editGame.goalie_rank_max!=null)?'selected':''}>Any</option>
-                ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${editGame && editGame.goalie_rank_max===n?'selected':''}>${n}</option>`).join('')}
+                <option value="" ${!(editGame && editGame.goalie_max_skill_level)?'selected':''}>Any</option>
+                ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${editGame && editGame.goalie_max_skill_level===code?'selected':''}>${label}</option>`).join('')}
               </select>
             </div>
           </div>
-          <div class="hint" style="margin-top:6px;">Leave the toggle off above if any rank is fine. With it on, set either or both of Minimum/Maximum — leave one as "Any" for an open-ended range.</div>
+          <div class="hint" style="margin-top:6px;">Leave the toggle off above if any skill level is fine. With it on, set either or both of Minimum/Maximum — leave one as "Any" for an open-ended range.</div>
         </div>
       </div>
       <button class="btn purple" onclick="postIce()">${editGame ? 'Save Changes' : 'Post Ice Time'}</button>
@@ -1923,6 +1985,11 @@ function renderPostIce(){
           <span class="tag" style="background:${gs.color};color:#04241a;">${gs.label}</span>
           ${s.goalie_budget_cents!=null ? `<span class="tag">$${(s.goalie_budget_cents/100).toFixed(0)}</span>` : ''}
         </div>
+        ${(()=>{ const signedUp = signups.filter(x=>x.ice_time_id===s.id); const fal = freeAgentListFor(s.id);
+          return `<div class="hint" style="margin-bottom:10px;">
+            ${signedUp.length ? signedUp.map(x=>{ const p = playerById(x.user_id); return `<span class="tag" style="margin:2px;">${p?p.name:'?'}${x.position_group?' ('+x.position_group+')':''} <span style="cursor:pointer;color:var(--danger);font-weight:900;" onclick="removePlayerFromGame('${s.id}','${x.user_id}','${(p?p.name:'this player').replace(/'/g,"\\'")}')">×</span></span>`; }).join('') : '<span>No signups yet.</span>'}
+            ${fal.length ? `<div style="margin-top:6px;">Free Agent List: ${fal.map(w=>{ const p = playerById(w.user_id); return p?p.name:'?'; }).join(', ')}</div>` : ''}
+          </div>`; })()}
         <div style="display:flex;gap:6px;">
           <button class="btn ghost small" onclick="editIceTime('${s.id}')">Edit</button>
           <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
@@ -1964,8 +2031,8 @@ async function postIce(){
   const rankOn = rankWrap && rankWrap.style.display !== 'none';
   const rankMinEl = document.getElementById('newGoalieRankMin');
   const rankMaxEl = document.getElementById('newGoalieRankMax');
-  const goalie_rank_min = (rankOn && rankMinEl.value !== '') ? Number(rankMinEl.value) : null;
-  const goalie_rank_max = (rankOn && rankMaxEl.value !== '') ? Number(rankMaxEl.value) : null;
+  const goalie_min_skill_level = (rankOn && rankMinEl.value !== '') ? rankMinEl.value : null;
+  const goalie_max_skill_level = (rankOn && rankMaxEl.value !== '') ? rankMaxEl.value : null;
   const costEl = document.getElementById('newCost');
   const cost_cents = (costEl && costEl.value !== '') ? Math.round(Number(costEl.value)*100) : null;
   const min_skill_level = document.getElementById('newMinSkill').value || null;
@@ -1973,7 +2040,7 @@ async function postIce(){
   const payload = {
     date_label, game_date, time_label, location, max_spots, cost_cents, min_skill_level, max_skill_level,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
-    goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_rank_min, goalie_rank_max,
+    goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_min_skill_level, goalie_max_skill_level,
   };
   if(editingGameId){
     const { error } = await sb.from('ice_times').update(payload).eq('id', editingGameId);
@@ -1994,6 +2061,17 @@ async function deleteIceTime(id, label){
   if(error){ showToast('Failed: '+error.message); return; }
   if(activeGameId === id) activeGameId = null;
   showToast('Ice time deleted ✓');
+  await loadIceTimes();
+  render();
+}
+async function removePlayerFromGame(iceTimeId, userId, playerName){
+  if(!confirm(`Remove ${playerName} from this game? Their spot refunds and the next Free Agent gets picked up automatically.`)) return;
+  const { data, error } = await sb.rpc('remove_player_from_ice_time', { p_ice_time_id: iceTimeId, p_user_id: userId });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast(`${playerName} removed ✓`);
+  if(data && data.promoted_user_id){
+    callAdmin('notify-waitlist-promotion', { ice_time_id: iceTimeId, user_id: data.promoted_user_id }).catch(()=>{});
+  }
   await loadIceTimes();
   render();
 }
