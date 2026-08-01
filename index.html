@@ -839,10 +839,11 @@ function renderPlayerProfile(){
         </select>
       </div>
       <div class="field">
-        <label>Positions (select all that apply)</label>
+        <label>Positions — click in order from most to least interested</label>
         <div class="chips" id="posChips">
-          ${POSITIONS.map(p=>`<div class="chip ${me.positions.includes(p)?'on':''}" onclick="togglePos('${p}')">${p}</div>`).join('')}
+          ${POSITIONS.map(p=>{ const rank = me.positions.indexOf(p); return `<div class="chip ${rank>-1?'on':''}" onclick="togglePos('${p}')">${rank>-1?'#'+(rank+1)+' ':''}${p}</div>`; }).join('')}
         </div>
+        <div class="hint" style="margin-top:6px;">Order matters for LW/C/RW/LD/RD — when spots fill up in a game, we try to place you in your top pick first.</div>
       </div>
       <div class="field">
         <label>Leagues you play in</label>
@@ -868,6 +869,7 @@ function renderPlayerProfile(){
         <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Bank Roll</label>
         <div class="rank-display" style="font-size:32px;">$${(me.bankroll_cents/100).toFixed(2)}</div>
         <div class="hint">Read-only — the commissioner adjusts this. It drops automatically when you commit to a paid game.</div>
+        <div class="hint" style="margin-top:8px;">To top up, e-transfer <strong style="color:var(--text)">pay@oblhockey.com</strong> (be sure to add your name in the message). Allow up to 24 hours for it to appear in your bank roll.</div>
       </div>
     </div>
   </div>
@@ -1242,22 +1244,38 @@ async function saveGoalieProfile(){
 }
 
 /* ---------- ICE TIMES ---------- */
+function positionBreakdown(it){
+  const forGame = signups.filter(x=>x.ice_time_id===it.id);
+  const cap = (group)=>{
+    if(group==='forward') return (it.fwd_lines||0)*3;
+    if(group==='defense') return (it.def_pairs||0)*2;
+    return it.goalies||0;
+  };
+  const filled = (group)=> forGame.filter(x=>x.position_group===group).length;
+  return {
+    forward: { filled: filled('forward'), cap: cap('forward') },
+    defense: { filled: filled('defense'), cap: cap('defense') },
+    goalie: { filled: filled('goalie'), cap: cap('goalie') },
+  };
+}
 function renderIceTimes(){
   return `
   <h2 class="section-title">Upcoming Ice Times — ${activeLeague}</h2>
   <p class="section-sub">Pick the sessions you're in for in ${leagueName()}. Spots are first-come, first-served.</p>
-  <p class="section-sub">Bank Roll: <strong>$${(me.bankroll_cents/100).toFixed(2)}</strong></p>
+  <p class="section-sub">Bank Roll: <strong>$${(me.bankroll_cents/100).toFixed(2)}</strong> — to top up, e-transfer <strong>pay@oblhockey.com</strong> (add your name in the message). Allow up to 24 hours to appear.</p>
   ${iceTimes.length ? iceTimes.map(s=>{
     const claimedFor = signups.filter(x=>x.ice_time_id===s.id);
     const pct = Math.round(claimedFor.length/s.max_spots*100);
     const inIt = claimedFor.some(x=>x.user_id===me.id);
     const skillLabel = skillLevelRangeLabel(s.min_skill_level, s.max_skill_level);
+    const bd = positionBreakdown(s);
     return `<div class="ice-card">
       <div>
         <div class="ice-date">${s.date_label} · ${s.time_label}</div>
         <div class="ice-loc">📍 ${s.location}</div>
         <div class="spots-bar"><div class="spots-fill" style="width:${pct}%"></div></div>
         <div class="hint">${claimedFor.length}/${s.max_spots} spots filled</div>
+        <div class="hint">${bd.forward.filled}/${bd.forward.cap} forwards · ${bd.defense.filled}/${bd.defense.cap} defense · ${bd.goalie.filled}/${bd.goalie.cap} goalies filled</div>
         <div class="hint">${s.cost_cents!=null ? `Cost: $${(s.cost_cents/100).toFixed(2)}` : 'Free session'}${skillLabel?' · '+skillLabel:''}</div>
         <div class="hint">${s.referee_id ? 'Referee: '+(playerById(s.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
       </div>
@@ -1273,9 +1291,16 @@ async function toggleIce(id){
     if(error){ showToast('Failed: '+error.message); return; }
     showToast('Removed from session');
   } else {
-    const { error } = await sb.rpc('claim_ice_time_spot', { p_ice_time_id: id });
+    const { data, error } = await sb.rpc('claim_ice_time_spot', { p_ice_time_id: id });
     if(error){ showToast(error.message.replace(/^.*?:\s*/,'')); return; }
-    showToast("You're in! ✓");
+    const groupLabel = { forward:'Forward', defense:'Defense', goalie:'Goalie' };
+    if(data && data.assigned_group && data.preferred_group && data.assigned_group !== data.preferred_group){
+      showToast(`You're in as ${groupLabel[data.assigned_group]} — ${groupLabel[data.preferred_group]} spots are full for this game.`);
+    } else if(data && data.assigned_group){
+      showToast(`You're in as ${groupLabel[data.assigned_group]} ✓`);
+    } else {
+      showToast("You're in! ✓");
+    }
   }
   const { data: freshMe } = await sb.from('profiles').select('bankroll_cents').eq('id', me.id).single();
   if(freshMe) me.bankroll_cents = freshMe.bankroll_cents;
@@ -2318,7 +2343,7 @@ function renderEditPlayerModal(){
           <div class="field">
             <label>Positions</label>
             <div class="chips">
-              ${POSITIONS.map(p=>`<div class="chip ${d.positions.includes(p)?'on':''}" onclick="epTogglePos('${p}')">${p}</div>`).join('')}
+              ${POSITIONS.map(p=>{ const rank = d.positions.indexOf(p); return `<div class="chip ${rank>-1?'on':''}" onclick="epTogglePos('${p}')">${rank>-1?'#'+(rank+1)+' ':''}${p}</div>`; }).join('')}
             </div>
           </div>
           <div class="field">
