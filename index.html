@@ -374,6 +374,7 @@ let rosterSort = 'name';   // 'name' | 'rank' | 'games' | 'age' | 'gender'
 let rosterView = 'active'; // 'active' | 'archived'
 let rosterShowAllLeagues = false; // commissioner: bypass per-league filter and show every player
 let editingPlayerId = null; // commissioner: profile id currently open in the edit-player modal
+let lightboxUrl = null; // image URL currently shown full-size in the lightbox overlay, or null
 let editingDraft = null;    // commissioner: working copy of that player's editable fields
 let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
 let searchFilters = { name:'', minAge:'', maxAge:'', minSkill:'beginner', maxSkill:'advanced', position:'any', status:'any', gender:'any', league:'any' };
@@ -741,6 +742,15 @@ function render(){
   else if(activeTab==='goalieroster') main.innerHTML = renderGoalieRoster();
   else if(activeTab==='pastgames') main.innerHTML = renderPastGames();
   else if(activeTab==='sellswap') main.innerHTML = renderSellSwap();
+  if(lightboxUrl) main.innerHTML += renderLightbox();
+}
+function openLightbox(url){ lightboxUrl = url; render(); }
+function closeLightbox(){ lightboxUrl = null; render(); }
+function renderLightbox(){
+  return `<div style="position:fixed;inset:0;background:rgba(10,13,18,.88);z-index:60;display:flex;align-items:center;justify-content:center;padding:24px;" onclick="if(event.target===this) closeLightbox()">
+    <img src="${lightboxUrl}" style="max-width:90vw;max-height:90vh;border-radius:10px;object-fit:contain;">
+    <button class="btn ghost small" style="position:fixed;top:20px;right:20px;" onclick="closeLightbox()">✕ Close</button>
+  </div>`;
 }
 
 /* ---------- ANNOUNCEMENTS ---------- */
@@ -1829,7 +1839,7 @@ function renderMerch(){
           <div class="field"><label>Emoji (used if no photo)</label><input id="merchIcon" value="${merchDraft.icon||''}" placeholder="🏒"></div>
         </div>
         <div style="text-align:center;">
-          <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;">${merchDraft.image_url ? `<img src="${merchDraft.image_url}">` : (merchDraft.icon||'🏒')}</div>
+          <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;${merchDraft.image_url?'cursor:pointer;':''}" ${merchDraft.image_url?`onclick="openLightbox('${merchDraft.image_url}')"`:''}>${merchDraft.image_url ? `<img src="${merchDraft.image_url}">` : (merchDraft.icon||'🏒')}</div>
           <input type="file" accept="image/*" onchange="onMerchImagePicked(this)">
         </div>
       </div>
@@ -1848,7 +1858,7 @@ function renderMerch(){
   <div class="grid cols-4">
     ${merch.map(m=>`
       <div class="merch-card">
-        <div class="merch-img">${m.image_url ? `<img src="${m.image_url}">` : (m.icon||'🏒')}</div>
+        <div class="merch-img" ${m.image_url?`style="cursor:pointer;" onclick="openLightbox('${m.image_url}')"`:''}>${m.image_url ? `<img src="${m.image_url}">` : (m.icon||'🏒')}</div>
         <div class="merch-body">
           <div class="merch-name">${m.name}</div>
           <div class="merch-price">$${(m.price_cents/100).toFixed(2)}</div>
@@ -1927,7 +1937,7 @@ function renderSellSwap(){
     const priceLabel = l.listing_type==='giveaway' ? 'Free — Give Away' : (l.price_cents ? '$'+(l.price_cents/100).toFixed(2) : 'Free');
     const commission = (l.listing_type==='sell' && l.price_cents) ? (l.price_cents*0.05/100).toFixed(2) : null;
     return `<div class="listing-card">
-      <div class="merch-img">${l.image_url ? `<img src="${l.image_url}">` : '📦'}</div>
+      <div class="merch-img" ${l.image_url?`style="cursor:pointer;" onclick="openLightbox('${l.image_url}')"`:''}>${l.image_url ? `<img src="${l.image_url}">` : '📦'}</div>
       <div class="merch-body">
         <div class="merch-name">${(l.title||'').replace(/</g,'&lt;')}</div>
         <div class="merch-price">${priceLabel}</div>
@@ -1959,7 +1969,7 @@ function renderSellSwap(){
         ` : `<div class="hint">Give Away listings are always free — no commission.</div>`}
       </div>
       <div style="text-align:center;">
-        <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;">${newListingImageUrl ? `<img src="${newListingImageUrl}">` : '📦'}</div>
+        <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;${newListingImageUrl?'cursor:pointer;':''}" ${newListingImageUrl?`onclick="openLightbox('${newListingImageUrl}')"`:''}>${newListingImageUrl ? `<img src="${newListingImageUrl}">` : '📦'}</div>
         <input type="file" accept="image/*" onchange="onListingImagePicked(this)">
       </div>
     </div>
