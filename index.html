@@ -200,7 +200,9 @@
   /* merch */
   .merch-card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;}
   .merch-img{height:130px;display:flex;align-items:center;justify-content:center;font-size:44px;
-    background:linear-gradient(135deg,var(--purple-dim),var(--teal-dim));}
+    background:linear-gradient(135deg,var(--purple-dim),var(--teal-dim));overflow:hidden;}
+  .merch-img img{width:100%;height:100%;object-fit:cover;}
+  .listing-card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;}
   .merch-body{padding:14px;flex:1;display:flex;flex-direction:column;}
   .merch-name{font-weight:600;font-size:14px;margin-bottom:2px;}
   .merch-price{color:var(--teal);font-weight:600;margin-bottom:10px;}
@@ -349,6 +351,12 @@ let role = 'player';
 let activeTab = 'dashboard';
 let activeLeague = 'OEBL'; // shared account, but ice times/games/merch are scoped per league
 let cart = [];
+let editingMerchId = null; // id of merch item being edited, 'new' for a new item, null = not editing
+let merchDraft = null;     // { name, price_cents, icon, image_url } while editing/adding
+let listings = [];         // marketplace_listings rows for the active league
+let newListingType = 'sell'; // 'sell' | 'giveaway' — toggle state on the Sell/Swap post form
+let newListingFree = false;  // "mark as free" checkbox state on the Sell/Swap post form
+let newListingImageUrl = ''; // image uploaded so far for the in-progress Sell/Swap post
 
 let roster = [];        // all profiles (for admin roster/lines)
 let iceTimes = [];      // ice_times rows — each one IS a "game" (lines are set per ice time)
@@ -550,7 +558,11 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings()]);
+}
+async function loadListings(){
+  const { data } = await sb.from('marketplace_listings').select('*').eq('league_id', activeLeague).gt('expires_at', new Date().toISOString()).order('created_at', { ascending:false });
+  listings = data || [];
 }
 async function loadArenas(){
   const { data } = await sb.from('arenas').select('*').eq('league_id', activeLeague).order('name');
@@ -580,18 +592,21 @@ const PLAYER_TABS = [
   {id:'lines', label:'Lines'},
   {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
+  {id:'sellswap', label:'Sell/Swap'},
 ];
 const GOALIE_TABS = [
   {id:'goaliedash', label:'Dashboard'},
   {id:'goalieroster', label:'Goalie Roster'},
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
+  {id:'sellswap', label:'Sell/Swap'},
 ];
 const REFEREE_TABS = [
   {id:'refdash', label:'Dashboard'},
   {id:'refroster', label:'Referee Roster'},
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
+  {id:'sellswap', label:'Sell/Swap'},
 ];
 const ADMIN_TABS = [
   {id:'announcements', label:'Announcements'},
@@ -604,6 +619,7 @@ const ADMIN_TABS = [
   {id:'refroster', label:'Referee Roster'},
   {id:'pastgames', label:'Past Games'},
   {id:'merch', label:'Merch'},
+  {id:'sellswap', label:'Sell/Swap'},
 ];
 function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
 function updateRoleToggleVisibility(){
@@ -724,6 +740,7 @@ function render(){
   else if(activeTab==='goaliedash') main.innerHTML = renderGoalieDashboard();
   else if(activeTab==='goalieroster') main.innerHTML = renderGoalieRoster();
   else if(activeTab==='pastgames') main.innerHTML = renderPastGames();
+  else if(activeTab==='sellswap') main.innerHTML = renderSellSwap();
 }
 
 /* ---------- ANNOUNCEMENTS ---------- */
@@ -1749,22 +1766,99 @@ function renderStats(){
 }
 
 /* ---------- MERCH ---------- */
+async function uploadListingImage(file){
+  if(!file) return null;
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+  const path = `${me.id}/${Date.now()}.${ext}`;
+  const { error } = await sb.storage.from('listing-images').upload(path, file, { upsert: true });
+  if(error){ showToast('Image upload failed: '+error.message); return null; }
+  const { data } = sb.storage.from('listing-images').getPublicUrl(path);
+  return data ? data.publicUrl : null;
+}
+function openMerchForm(id){
+  const item = id ? merch.find(x=>x.id===id) : null;
+  editingMerchId = item ? item.id : 'new';
+  merchDraft = item ? { name:item.name, price_cents:item.price_cents, icon:item.icon||'', image_url:item.image_url||'' }
+                     : { name:'', price_cents:0, icon:'', image_url:'' };
+  render();
+}
+function closeMerchForm(){ editingMerchId = null; merchDraft = null; render(); }
+async function onMerchImagePicked(input){
+  if(!input.files || !input.files[0]) return;
+  showToast('Uploading image…');
+  const url = await uploadListingImage(input.files[0]);
+  if(url){ merchDraft.image_url = url; showToast('Image uploaded ✓'); render(); }
+}
+async function saveMerchItem(){
+  const nameEl = document.getElementById('merchName');
+  const priceEl = document.getElementById('merchPrice');
+  const iconEl = document.getElementById('merchIcon');
+  merchDraft.name = nameEl.value.trim();
+  merchDraft.price_cents = Math.round(Number(priceEl.value)*100) || 0;
+  merchDraft.icon = iconEl.value.trim();
+  if(!merchDraft.name){ showToast('Enter an item name'); return; }
+  const payload = { name: merchDraft.name, price_cents: merchDraft.price_cents, icon: merchDraft.icon || null, image_url: merchDraft.image_url || null, active: true, league_id: activeLeague };
+  let error;
+  if(editingMerchId==='new'){
+    ({ error } = await sb.from('merch_items').insert(payload));
+  } else {
+    ({ error } = await sb.from('merch_items').update(payload).eq('id', editingMerchId));
+  }
+  if(error){ showToast('Save failed: '+error.message); return; }
+  showToast('Item saved ✓');
+  closeMerchForm();
+  await loadMerch();
+  render();
+}
+async function deleteMerchItem(id, name){
+  if(!confirm(`Remove "${name}" from the merch store?`)) return;
+  const { error } = await sb.from('merch_items').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Item removed');
+  await loadMerch();
+  render();
+}
 function renderMerch(){
+  const form = (editingMerchId!=null) ? `
+    <div class="panel" style="margin-bottom:16px;">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">${editingMerchId==='new'?'Add Item':'Edit Item'}</h3>
+      <div class="grid cols-2">
+        <div>
+          <div class="field"><label>Item Name</label><input id="merchName" value="${merchDraft.name||''}"></div>
+          <div class="field"><label>Price ($)</label><input id="merchPrice" type="number" min="0" step="0.01" value="${(merchDraft.price_cents/100).toFixed(2)}"></div>
+          <div class="field"><label>Emoji (used if no photo)</label><input id="merchIcon" value="${merchDraft.icon||''}" placeholder="🏒"></div>
+        </div>
+        <div style="text-align:center;">
+          <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;">${merchDraft.image_url ? `<img src="${merchDraft.image_url}">` : (merchDraft.icon||'🏒')}</div>
+          <input type="file" accept="image/*" onchange="onMerchImagePicked(this)">
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;">
+        <button class="btn purple" onclick="saveMerchItem()">Save Item</button>
+        <button class="btn ghost" onclick="closeMerchForm()">Cancel</button>
+      </div>
+    </div>` : '';
   return `
   <div class="row-flex">
     <div><h2 class="section-title" style="margin-bottom:0;">${activeLeague} Merch</h2><p class="section-sub">Represent ${leagueName()}.</p></div>
     <div class="hint">Cart: <span class="cart-badge">${cart.length}</span></div>
   </div>
+  ${me.is_commissioner ? `<button class="btn purple small" style="margin-bottom:14px;" onclick="openMerchForm(null)">+ Add Item</button>` : ''}
+  ${form}
   <div class="grid cols-4">
     ${merch.map(m=>`
       <div class="merch-card">
-        <div class="merch-img">${m.icon||'🏒'}</div>
+        <div class="merch-img">${m.image_url ? `<img src="${m.image_url}">` : (m.icon||'🏒')}</div>
         <div class="merch-body">
           <div class="merch-name">${m.name}</div>
           <div class="merch-price">$${(m.price_cents/100).toFixed(2)}</div>
           <button class="btn small" onclick="addToCart('${m.id}')">Add to Cart</button>
+          ${me.is_commissioner ? `<div style="display:flex;gap:6px;margin-top:8px;">
+            <button class="btn ghost small" onclick="openMerchForm('${m.id}')">Edit</button>
+            <button class="btn ghost small" onclick="deleteMerchItem('${m.id}','${(m.name||'').replace(/'/g,"\\'")}')">Delete</button>
+          </div>` : ''}
         </div>
-      </div>`).join('')}
+      </div>`).join('') || '<div class="empty">No items yet.</div>'}
   </div>
   <div class="panel" style="margin-top:20px;">
     <div class="row-flex">
@@ -1778,6 +1872,107 @@ function renderMerch(){
   `;
 }
 function addToCart(id){ cart.push(id); showToast('Added to cart'); render(); }
+
+/* ---------- SELL / SWAP ---------- */
+function setListingType(t){ newListingType = t; if(t==='giveaway') newListingFree = false; render(); }
+function toggleListingFree(){ newListingFree = !newListingFree; render(); }
+async function onListingImagePicked(input){
+  if(!input.files || !input.files[0]) return;
+  showToast('Uploading image…');
+  const url = await uploadListingImage(input.files[0]);
+  if(url){ newListingImageUrl = url; showToast('Image uploaded ✓'); render(); }
+}
+function listingDaysLeft(l){
+  const ms = new Date(l.expires_at).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / 86400000));
+}
+async function postListing(){
+  const titleEl = document.getElementById('listingTitle');
+  const descEl = document.getElementById('listingDesc');
+  const priceEl = document.getElementById('listingPrice');
+  const title = titleEl.value.trim();
+  if(!title){ showToast('Enter a title'); return; }
+  const listing_type = newListingType;
+  let price_cents = null;
+  if(listing_type==='sell'){
+    price_cents = newListingFree ? 0 : (Math.round(Number(priceEl.value)*100) || 0);
+  }
+  const payload = {
+    user_id: me.id, league_id: activeLeague, title,
+    description: descEl.value.trim() || null,
+    listing_type, price_cents,
+    image_url: newListingImageUrl || null,
+  };
+  const { error } = await sb.from('marketplace_listings').insert(payload);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Listing posted ✓');
+  newListingType = 'sell'; newListingFree = false; newListingImageUrl = '';
+  await loadListings();
+  render();
+}
+async function deleteListing(id, title){
+  if(!confirm(`Remove listing "${title}"?`)) return;
+  const { error } = await sb.from('marketplace_listings').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Listing removed');
+  await loadListings();
+  render();
+}
+function renderSellSwap(){
+  const mine = listings.filter(l=>l.user_id===me.id);
+  const others = listings.filter(l=>l.user_id!==me.id);
+  const cardHTML = (l)=>{
+    const poster = playerById(l.user_id);
+    const canDelete = l.user_id===me.id || me.is_commissioner;
+    const priceLabel = l.listing_type==='giveaway' ? 'Free — Give Away' : (l.price_cents ? '$'+(l.price_cents/100).toFixed(2) : 'Free');
+    const commission = (l.listing_type==='sell' && l.price_cents) ? (l.price_cents*0.05/100).toFixed(2) : null;
+    return `<div class="listing-card">
+      <div class="merch-img">${l.image_url ? `<img src="${l.image_url}">` : '📦'}</div>
+      <div class="merch-body">
+        <div class="merch-name">${(l.title||'').replace(/</g,'&lt;')}</div>
+        <div class="merch-price">${priceLabel}</div>
+        ${l.description ? `<div class="hint" style="margin-bottom:8px;">${l.description.replace(/</g,'&lt;')}</div>` : ''}
+        <div class="hint">Posted by ${poster?poster.name:'Unknown'}${poster && (poster.contact_phone||poster.contact_email) ? ' · '+[poster.contact_phone,poster.contact_email].filter(Boolean).join(' · ') : ''}</div>
+        <div class="hint" style="margin-top:4px;">${listingDaysLeft(l)} day${listingDaysLeft(l)===1?'':'s'} left before auto-removal</div>
+        ${commission ? `<div class="hint" style="margin-top:6px;">5% ($${commission}) goes to the commissioner — arrange payment directly with the seller, then e-transfer the commission to <strong style="color:var(--text)">pay@oblhockey.com</strong>.</div>` : ''}
+        ${canDelete ? `<button class="btn ghost small" style="margin-top:10px;" onclick="deleteListing('${l.id}','${(l.title||'').replace(/'/g,"\\'")}')">Delete</button>` : ''}
+      </div>
+    </div>`;
+  };
+  return `
+  <h2 class="section-title">Sell / Swap — ${activeLeague}</h2>
+  <p class="section-sub">Sell your used gear or give it away to a teammate. Listings auto-remove after 2 weeks.</p>
+  <div class="panel" style="margin-bottom:20px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Post an Item</h3>
+    <div class="chips" style="margin-bottom:12px;">
+      <div class="chip ${newListingType==='sell'?'on':''}" onclick="setListingType('sell')">Sell</div>
+      <div class="chip ${newListingType==='giveaway'?'on':''}" onclick="setListingType('giveaway')">Give Away</div>
+    </div>
+    <div class="grid cols-2">
+      <div>
+        <div class="field"><label>Title</label><input id="listingTitle" placeholder="e.g. Bauer Vapor skates, size 9"></div>
+        <div class="field"><label>Description</label><textarea id="listingDesc" rows="3" placeholder="Condition, size, why you're selling, etc."></textarea></div>
+        ${newListingType==='sell' ? `
+          <div class="field" style="max-width:200px;"><label>Price ($)</label><input id="listingPrice" type="number" min="0" step="0.01" value="0" ${newListingFree?'disabled':''}></div>
+          <div style="margin-top:-8px;margin-bottom:10px;"><label class="hint"><input type="checkbox" ${newListingFree?'checked':''} onchange="toggleListingFree()" style="width:auto;margin-right:6px;">Mark as free</label></div>
+          <div class="hint">If you set a price, 5% goes to the commissioner — you settle payment directly with the buyer, then e-transfer the commission.</div>
+        ` : `<div class="hint">Give Away listings are always free — no commission.</div>`}
+      </div>
+      <div style="text-align:center;">
+        <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;">${newListingImageUrl ? `<img src="${newListingImageUrl}">` : '📦'}</div>
+        <input type="file" accept="image/*" onchange="onListingImagePicked(this)">
+      </div>
+    </div>
+    <button class="btn purple" style="margin-top:10px;" onclick="postListing()">Post Listing</button>
+  </div>
+  <h3 style="font-size:15px;color:var(--muted);">${mine.length ? 'Your Listings' : ''}</h3>
+  ${mine.length ? `<div class="grid cols-4" style="margin-bottom:20px;">${mine.map(cardHTML).join('')}</div>` : ''}
+  <h3 style="font-size:15px;color:var(--muted);">${listings.length ? 'All Listings' : ''}</h3>
+  <div class="grid cols-4">
+    ${others.map(cardHTML).join('') || (mine.length ? '' : '<div class="empty">No items posted yet.</div>')}
+  </div>
+  `;
+}
 
 /* ---------- ADMIN: POST ICE TIME ---------- */
 function arenaAggregate(){
