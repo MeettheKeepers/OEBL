@@ -1749,25 +1749,26 @@ async function renameTeam(field, current){
 
 /* ---------- STATS ---------- */
 function renderStats(){
-  const rows = allStats
-    .filter(s=>s.player_id===me.id)
-    .map(s=>({ stat:s, game: iceTimes.find(it=>it.id===s.game_id) }))
-    .filter(r=>r.game)
-    .sort((a,b)=> (a.game.game_date||'').localeCompare(b.game.game_date||''));
-  const totalGoals = rows.reduce((a,r)=>a+r.stat.goals,0);
-  const totalAssists = rows.reduce((a,r)=>a+r.stat.assists,0);
+  const statFor = (gameId)=> allStats.find(s=>s.game_id===gameId && s.player_id===me.id) || { goals:0, assists:0 };
+  const games = [...iceTimes].sort((a,b)=> (a.game_date||'').localeCompare(b.game_date||''));
+  const mine = allStats.filter(s=>s.player_id===me.id);
+  const totalGoals = mine.reduce((a,s)=>a+s.goals,0);
+  const totalAssists = mine.reduce((a,s)=>a+s.assists,0);
   return `
   <h2 class="section-title">My Stats — ${activeLeague}</h2>
-  <p class="section-sub">Goals and assists recorded by the commissioner, linked to each game.</p>
+  <p class="section-sub">Enter your own goals and assists per game — a commissioner can also adjust these.</p>
   <div class="panel">
   <table>
     <tr><th>Game</th><th>Goals</th><th>Assists</th><th>Points</th></tr>
-    ${rows.length ? rows.map(r=>`<tr>
-      <td>${iceTimeLabel(r.game)}</td>
-      <td>${r.stat.goals}</td>
-      <td>${r.stat.assists}</td>
-      <td>${r.stat.goals + r.stat.assists}</td>
-    </tr>`).join('') : `<tr><td colspan="4" class="hint">No stats recorded yet.</td></tr>`}
+    ${games.length ? games.map(g=>{
+      const s = statFor(g.id);
+      return `<tr>
+        <td>${iceTimeLabel(g)}</td>
+        <td><input type="number" min="0" style="width:64px;" value="${s.goals}" onchange="setStat('${g.id}','${me.id}','goals',this.value)"></td>
+        <td><input type="number" min="0" style="width:64px;" value="${s.assists}" onchange="setStat('${g.id}','${me.id}','assists',this.value)"></td>
+        <td>${s.goals + s.assists}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="4" class="hint">No games posted yet.</td></tr>`}
     <tr style="border-top:2px solid var(--line);font-weight:600;">
       <td>Total</td><td>${totalGoals}</td><td>${totalAssists}</td><td>${totalGoals+totalAssists}</td>
     </tr>
@@ -1928,14 +1929,54 @@ async function deleteListing(id, title){
   await loadListings();
   render();
 }
+async function markListingSold(id, location, title, listingOwnerId){
+  const msg = location==='on_app'
+    ? `Mark "${title}" as sold on the app? A 5% commission will be automatically deducted from the seller's bank roll.`
+    : `Mark "${title}" as sold off the app? No commission will be charged, but this is tracked for commissioner review.`;
+  if(!confirm(msg)) return;
+  const { data, error } = await sb.rpc('mark_listing_sold', { p_listing_id: id, p_location: location });
+  if(error){ showToast('Failed: '+error.message); return; }
+  if(data && data.commission_cents){
+    showToast(`Marked sold ✓ — $${(data.commission_cents/100).toFixed(2)} commission deducted from bank roll`);
+  } else {
+    showToast('Marked sold ✓');
+  }
+  if(listingOwnerId===me.id){
+    const { data: freshMe } = await sb.from('profiles').select('bankroll_cents').eq('id', me.id).single();
+    if(freshMe) me.bankroll_cents = freshMe.bankroll_cents;
+  }
+  await loadListings();
+  await loadRoster();
+  render();
+}
 function renderSellSwap(){
   const mine = listings.filter(l=>l.user_id===me.id);
-  const others = listings.filter(l=>l.user_id!==me.id);
+  const others = listings.filter(l=>l.user_id!==me.id && l.status==='active');
   const cardHTML = (l)=>{
     const poster = playerById(l.user_id);
-    const canDelete = l.user_id===me.id || me.is_commissioner;
+    const canManage = l.user_id===me.id || me.is_commissioner;
     const priceLabel = l.listing_type==='giveaway' ? 'Free — Give Away' : (l.price_cents ? '$'+(l.price_cents/100).toFixed(2) : 'Free');
     const commission = (l.listing_type==='sell' && l.price_cents) ? (l.price_cents*0.05/100).toFixed(2) : null;
+    const titleEsc = (l.title||'').replace(/'/g,"\\'");
+    let statusHTML = '';
+    if(l.status==='sold_on_app') statusHTML = `<div class="hint" style="margin-top:6px;color:var(--teal);">✓ Sold on the app — commission auto-deducted</div>`;
+    else if(l.status==='sold_off_app') statusHTML = `<div class="hint" style="margin-top:6px;">Marked sold off the app</div>`;
+    let actionsHTML = '';
+    if(canManage){
+      if(l.status==='active'){
+        if(commission){
+          actionsHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+            <button class="btn small" onclick="markListingSold('${l.id}','on_app','${titleEsc}','${l.user_id}')">Sold on App</button>
+            <button class="btn ghost small" onclick="markListingSold('${l.id}','off_app','${titleEsc}','${l.user_id}')">Sold off App</button>
+            <button class="btn ghost small" onclick="deleteListing('${l.id}','${titleEsc}')">Remove</button>
+          </div>`;
+        } else {
+          actionsHTML = `<button class="btn ghost small" style="margin-top:10px;" onclick="deleteListing('${l.id}','${titleEsc}')">Remove Listing</button>`;
+        }
+      } else {
+        actionsHTML = `<button class="btn ghost small" style="margin-top:10px;" onclick="deleteListing('${l.id}','${titleEsc}')">Remove Listing</button>`;
+      }
+    }
     return `<div class="listing-card">
       <div class="merch-img" ${l.image_url?`style="cursor:pointer;" onclick="openLightbox('${l.image_url}')"`:''}>${l.image_url ? `<img src="${l.image_url}">` : '📦'}</div>
       <div class="merch-body">
@@ -1944,8 +1985,9 @@ function renderSellSwap(){
         ${l.description ? `<div class="hint" style="margin-bottom:8px;">${l.description.replace(/</g,'&lt;')}</div>` : ''}
         <div class="hint">Posted by ${poster?poster.name:'Unknown'}${poster && (poster.contact_phone||poster.contact_email) ? ' · '+[poster.contact_phone,poster.contact_email].filter(Boolean).join(' · ') : ''}</div>
         <div class="hint" style="margin-top:4px;">${listingDaysLeft(l)} day${listingDaysLeft(l)===1?'':'s'} left before auto-removal</div>
-        ${commission ? `<div class="hint" style="margin-top:6px;">5% ($${commission}) goes to the commissioner — arrange payment directly with the seller, then e-transfer the commission to <strong style="color:var(--text)">pay@oblhockey.com</strong>.</div>` : ''}
-        ${canDelete ? `<button class="btn ghost small" style="margin-top:10px;" onclick="deleteListing('${l.id}','${(l.title||'').replace(/'/g,"\\'")}')">Delete</button>` : ''}
+        ${commission && l.status==='active' ? `<div class="hint" style="margin-top:6px;">If sold on the app, 5% ($${commission}) is auto-deducted from your bank roll — no e-transfer needed.</div>` : ''}
+        ${statusHTML}
+        ${actionsHTML}
       </div>
     </div>`;
   };
@@ -1965,7 +2007,7 @@ function renderSellSwap(){
         ${newListingType==='sell' ? `
           <div class="field" style="max-width:200px;"><label>Price ($)</label><input id="listingPrice" type="number" min="0" step="0.01" value="0" ${newListingFree?'disabled':''}></div>
           <div style="margin-top:-8px;margin-bottom:10px;"><label class="hint"><input type="checkbox" ${newListingFree?'checked':''} onchange="toggleListingFree()" style="width:auto;margin-right:6px;">Mark as free</label></div>
-          <div class="hint">If you set a price, 5% goes to the commissioner — you settle payment directly with the buyer, then e-transfer the commission.</div>
+          <div class="hint">If you set a price, once it sells you'll mark it Sold on the App or Sold off the App. Sold on the App automatically deducts a 5% commission from your bank roll — no e-transfer needed.</div>
         ` : `<div class="hint">Give Away listings are always free — no commission.</div>`}
       </div>
       <div style="text-align:center;">
@@ -2301,7 +2343,7 @@ function renderSetStats(){
   }).join('');
   return `
   <h2 class="section-title">Set Stats — ${activeLeague}</h2>
-  <p class="section-sub">Log goals and assists per player for the selected ${activeLeague} game.</p>
+  <p class="section-sub">Log goals and assists per player for the selected ${activeLeague} game. Players can also enter their own — this overrides whatever they've entered.</p>
   <div class="field" style="max-width:320px;"><select onchange="activeStatsGameId=this.value;render()">${opts}</select></div>
   <div class="panel">
   <table>
@@ -2391,6 +2433,8 @@ function sortedRoster(list){
     arr.sort((a,b)=> (a.gender||'').localeCompare(b.gender||'') || a.name.localeCompare(b.name));
   } else if(rosterSort==='league'){
     arr.sort((a,b)=> ((a.leagues||[])[0]||'').localeCompare((b.leagues||[])[0]||'') || a.name.localeCompare(b.name));
+  } else if(rosterSort==='offappsales'){
+    arr.sort((a,b)=> (b.off_app_sale_count||0)-(a.off_app_sale_count||0));
   } else arr.sort((a,b)=> a.name.localeCompare(b.name));
   return arr;
 }
@@ -2444,12 +2488,13 @@ function renderRoster(){
         <option value="age" ${rosterSort==='age'?'selected':''}>Sort: Age</option>
         <option value="gender" ${rosterSort==='gender'?'selected':''}>Sort: Gender</option>
         <option value="league" ${rosterSort==='league'?'selected':''}>Sort: League</option>
+        <option value="offappsales" ${rosterSort==='offappsales'?'selected':''}>Sort: Off-App Sales</option>
       </select>
     </div>
   </div>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Off-App Sales</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
       const inj = INJURY[p.injury_status||'green'];
       const age = calcAge(p.birthdate);
@@ -2462,6 +2507,7 @@ function renderRoster(){
           ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${p.skill_level===code?'selected':''}>${label}</option>`).join('')}
         </select></td>
         <td><input type="number" step="0.01" style="width:80px;" value="${(p.bankroll_cents/100).toFixed(2)}" onchange="updatePlayerBankroll('${p.id}',this.value)"></td>
+        <td>${p.off_app_sale_count ? `<span class="tag" style="background:var(--danger);color:#fff;" title="Claimed 'sold off the app' this many times">${p.off_app_sale_count}</span>` : '0'}</td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
         <td>${(p.leagues||[]).length ? (p.leagues||[]).map(l=>`<span class="tag pos">${l}</span>`).join('') : '<span class="hint">—</span>'}</td>
@@ -2483,7 +2529,7 @@ function renderRoster(){
           `}
         </td>
       </tr>`;
-    }).join('') : `<tr><td colspan="12" class="empty">No ${rosterView} players.</td></tr>`}
+    }).join('') : `<tr><td colspan="13" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
   </div>
   ${editingPlayerId ? renderEditPlayerModal() : ''}`;
