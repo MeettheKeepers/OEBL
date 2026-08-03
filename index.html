@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="OBL">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#0a0d12">
+<meta name="theme-color" content="#000000">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -44,33 +44,18 @@
   /* ---------- SIGN IN ---------- */
   #signin{
     min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;
-    background:
-      radial-gradient(circle at 50% -10%, rgba(79,209,217,.15), transparent 60%),
-      radial-gradient(circle at 100% 100%, rgba(138,79,214,.12), transparent 50%),
-      var(--bg);
+    background:#000000;
+    --bg:#000000;--panel:#000000;--panel2:#0e0e0e;--line:#2a2a2a;--text:#ffffff;--muted:#b3b3b3;
     padding:24px;
   }
   .card{
     background:var(--panel);border:1px solid var(--line);border-radius:16px;
-    padding:36px 32px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);
+    padding:36px 32px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6);
   }
-  .badge{width:120px;height:120px;margin:0 auto 18px;position:relative;}
-  .badge-ring{
-    width:120px;height:120px;border-radius:50%;
-    background:linear-gradient(180deg,var(--teal-dim),var(--bg) 70%);
-    border:3px solid var(--teal);position:relative;overflow:hidden;
-    display:flex;align-items:center;justify-content:center;
-  }
-  .skyline{
-    position:absolute;bottom:14px;left:0;right:0;height:46px;
-    background:var(--bg);
-    clip-path:polygon(0 100%,0 60%,10% 60%,10% 30%,16% 30%,16% 0%,20% 0%,20% 34%,26% 34%,26% 55%,34% 55%,34% 20%,38% 20%,38% 55%,46% 55%,46% 40%,50% 5%,54% 40%,54% 55%,64% 55%,64% 30%,68% 30%,68% 60%,76% 60%,76% 40%,82% 40%,82% 60%,90% 60%,90% 100%);
-  }
-  .badge-txt{position:absolute;top:14px;font-size:9px;font-family:'Anton',sans-serif;letter-spacing:2px;color:#fff;text-align:center;width:100%;}
-  .badge-star{position:absolute;bottom:8px;font-size:10px;color:var(--purple);width:100%;text-align:center;letter-spacing:6px;}
+  .brand-logo{display:block;width:150px;height:150px;margin:0 auto 18px;object-fit:contain;}
   .brand-title{text-align:center;font-size:26px;line-height:1.05;margin:0 0 2px;color:#fff;}
-  .brand-sub{text-align:center;font-size:30px;line-height:1;margin:0 0 6px;color:var(--teal);}
-  .brand-code{text-align:center;color:var(--purple);font-size:13px;letter-spacing:3px;margin-bottom:22px;}
+  .brand-sub{text-align:center;font-size:20px;line-height:1;margin:0 0 6px;color:#fff;letter-spacing:2px;font-family:'Anton',sans-serif;}
+  .brand-code{text-align:center;color:var(--muted);font-size:13px;letter-spacing:3px;margin-bottom:22px;}
   .field{margin-bottom:14px;}
   .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;}
   .field input, .field select, .field textarea{
@@ -91,7 +76,7 @@
   .btn.danger{background:linear-gradient(90deg,#7a2b2b,var(--danger));color:#fff;}
   .btn:disabled{opacity:.45;cursor:not-allowed;transform:none;}
   .signin-footer{text-align:center;margin-top:16px;font-size:13px;color:var(--muted);}
-  .signin-footer a{color:var(--teal);cursor:pointer;text-decoration:underline;}
+  .signin-footer a{color:#fff;cursor:pointer;text-decoration:underline;}
   .demo-note{margin-top:22px;font-size:11px;color:var(--muted);text-align:center;max-width:340px;}
 
   /* ---------- APP SHELL ---------- */
@@ -115,7 +100,7 @@
     border-bottom:1px solid var(--line);
     display:flex;align-items:center;gap:18px;padding:12px 24px;flex-wrap:wrap;
   }
-  .mini-badge{width:42px;height:42px;border-radius:50%;background:linear-gradient(180deg,var(--teal-dim),var(--bg) 70%);border:2px solid var(--teal);flex:none;}
+  .mini-badge{width:42px;height:42px;border-radius:9px;object-fit:contain;background:#000;flex:none;}
   .titlebox{line-height:1.05;}
   .titlebox .t1{font-size:16px;color:var(--text);}
   .titlebox .t2{font-size:12px;color:var(--purple);letter-spacing:2px;}
@@ -232,16 +217,8 @@
 <!-- ============ SIGN IN SCREEN ============ -->
 <div id="signin">
   <div class="card">
-    <div class="badge">
-      <div class="badge-ring">
-        <div class="skyline"></div>
-        <div class="badge-txt">OTTAWA</div>
-        <div class="badge-star">★ OBL ★</div>
-      </div>
-    </div>
-    <h1 class="brand-title">OTTAWA</h1>
-    <div class="brand-sub">BEER LEAGUE</div>
-    <div class="brand-code">— (OBL) —</div>
+    <img class="brand-logo" src="icon.png" alt="OBL Hockey">
+    <div class="brand-sub">OTTAWA BEER LEAGUE</div>
 
     <div id="signinForm">
       <div class="field"><label>Name</label><input id="loginName" type="text" placeholder="Jordan Byrne"></div>
@@ -258,7 +235,7 @@
 <!-- ============ MAIN APP ============ -->
 <div id="app">
   <header class="top">
-    <div class="mini-badge"></div>
+    <img class="mini-badge" src="icon.png" alt="OBL">
     <div class="titlebox">
       <div class="t1">OTTAWA BEER LEAGUE</div>
       <div class="t2">OBL</div>
