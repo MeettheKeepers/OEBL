@@ -356,6 +356,8 @@ let editingDraft = null;    // commissioner: working copy of that player's edita
 let arenas = [];           // arenas rows for activeLeague (commissioner-managed)
 let searchFilters = { name:'', minAge:'', maxAge:'', minSkill:'beginner', maxSkill:'advanced', position:'any', status:'any', gender:'any', league:'any' };
 let selectedPlayerIds = []; // player ids selected in Message Players tab
+let leagueRules = null;   // league_rules row for activeLeague, or null if none set yet
+let editingRules = false; // commissioner: whether the Rules tab is showing the edit textarea
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
@@ -425,6 +427,7 @@ async function enterApp(sess){
   me.bankroll_cents = me.bankroll_cents || 0;
   me.contact_phone = me.contact_phone || '';
   me.contact_email = me.contact_email || '';
+  me.has_seen_rules = !!me.has_seen_rules;
   if(!me.is_commissioner && me.leagues.length && !me.leagues.includes(activeLeague)){
     activeLeague = me.leagues[0];
   }
@@ -443,6 +446,13 @@ async function enterApp(sess){
   await loadLeagueData();
   await initPush();
   setRole('player');
+  if(!me.has_seen_rules){
+    activeTab = 'rules';
+    renderTabs(tabsForRole('player'));
+    render();
+    me.has_seen_rules = true;
+    await sb.from('profiles').update({ has_seen_rules: true }).eq('id', me.id);
+  }
 }
 
 /* ================= PUSH NOTIFICATIONS ================= */
@@ -536,7 +546,11 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules()]);
+}
+async function loadRules(){
+  const { data } = await sb.from('league_rules').select('*').eq('league_id', activeLeague).maybeSingle();
+  leagueRules = data || null;
 }
 async function loadListings(){
   const { data } = await sb.from('marketplace_listings').select('*').eq('league_id', activeLeague).gt('expires_at', new Date().toISOString()).order('created_at', { ascending:false });
@@ -571,6 +585,7 @@ const PLAYER_TABS = [
   {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'rules', label:'Rules'},
 ];
 const GOALIE_TABS = [
   {id:'goaliedash', label:'Dashboard'},
@@ -578,6 +593,7 @@ const GOALIE_TABS = [
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'rules', label:'Rules'},
 ];
 const REFEREE_TABS = [
   {id:'refdash', label:'Dashboard'},
@@ -585,6 +601,7 @@ const REFEREE_TABS = [
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'rules', label:'Rules'},
 ];
 const ADMIN_TABS = [
   {id:'announcements', label:'Announcements'},
@@ -598,6 +615,7 @@ const ADMIN_TABS = [
   {id:'pastgames', label:'Past Games'},
   {id:'merch', label:'Merch'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'rules', label:'Rules'},
 ];
 function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
 function updateRoleToggleVisibility(){
@@ -719,6 +737,7 @@ function render(){
   else if(activeTab==='goalieroster') main.innerHTML = renderGoalieRoster();
   else if(activeTab==='pastgames') main.innerHTML = renderPastGames();
   else if(activeTab==='sellswap') main.innerHTML = renderSellSwap();
+  else if(activeTab==='rules') main.innerHTML = renderRules();
   if(lightboxUrl) main.innerHTML += renderLightbox();
 }
 function openLightbox(url){ lightboxUrl = url; render(); }
@@ -728,6 +747,40 @@ function renderLightbox(){
     <img src="${lightboxUrl}" style="max-width:90vw;max-height:90vh;border-radius:10px;object-fit:contain;">
     <button class="btn ghost small" style="position:fixed;top:20px;right:20px;" onclick="closeLightbox()">✕ Close</button>
   </div>`;
+}
+
+/* ---------- RULES ---------- */
+function renderRules(){
+  const content = (leagueRules && leagueRules.content) ? leagueRules.content : '';
+  const editBtn = me.is_commissioner
+    ? `<button class="btn ghost small" onclick="editingRules=true; render();">Edit Rules</button>`
+    : '';
+  if(me.is_commissioner && editingRules){
+    return `
+    <h2 class="section-title">League Rules — ${activeLeague}</h2>
+    <p class="section-sub">Players see this the first time they sign in, and can always come back to this tab. It's read-only for them.</p>
+    <div class="panel">
+      <div class="field"><label>Rules</label><textarea id="rulesInput" rows="16" placeholder="Type the league rules here...">${content}</textarea></div>
+      <button class="btn purple" onclick="saveRules()">Save Rules</button>
+      <button class="btn ghost" onclick="editingRules=false; render();">Cancel</button>
+    </div>`;
+  }
+  return `
+  <h2 class="section-title">League Rules — ${activeLeague}</h2>
+  <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league rules below.'}</p>
+  <div class="panel">
+    ${editBtn}
+    ${content ? `<div style="white-space:pre-wrap;line-height:1.6;${editBtn?'margin-top:12px;':''}">${content.replace(/</g,'&lt;')}</div>` : `<p class="hint">No rules have been posted yet.</p>`}
+  </div>`;
+}
+async function saveRules(){
+  const content = document.getElementById('rulesInput').value;
+  const { error } = await sb.from('league_rules').upsert({ league_id: activeLeague, content, updated_at: new Date().toISOString() }, { onConflict: 'league_id' });
+  if(error){ showToast('Failed to save rules: '+error.message); return; }
+  leagueRules = { league_id: activeLeague, content };
+  editingRules = false;
+  showToast('Rules saved ✓');
+  render();
 }
 
 /* ---------- ANNOUNCEMENTS ---------- */
