@@ -110,6 +110,25 @@
     font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;
   }
   nav.tabs button.active{background:var(--panel2);color:var(--teal);}
+
+  .body-shell{display:flex;align-items:flex-start;max-width:1300px;margin:0 auto;}
+  .sidebar{
+    width:230px;flex:none;padding:24px 18px;border-right:1px solid var(--line);
+    position:sticky;top:73px;align-self:flex-start;
+  }
+  .sidebar-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:600;}
+  .sidebar select#tabsSelect{
+    width:100%;padding:13px 14px;border-radius:9px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);font-size:14px;font-weight:600;
+    -webkit-appearance:menulist;appearance:menulist;cursor:pointer;
+  }
+  .sidebar select#tabsSelect:focus{outline:2px solid var(--teal);}
+  .main-col{flex:1;min-width:0;}
+  @media(max-width:800px){
+    .body-shell{flex-direction:column;}
+    .sidebar{width:100%;border-right:none;border-bottom:1px solid var(--line);position:relative;top:0;}
+  }
+
   .role-toggle{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:3px;font-size:12px;}
   .role-toggle button{border-radius:16px;padding:6px 12px;background:transparent;color:var(--muted);font-weight:600;}
   .role-toggle button.active{background:var(--purple);color:#fff;}
@@ -240,8 +259,7 @@
       <div class="t1">OTTAWA BEER LEAGUE</div>
       <div class="t2">OBL</div>
     </div>
-    <nav class="tabs" id="tabs"></nav>
-    <div class="role-toggle" id="roleToggle" style="display:none;">
+    <div class="role-toggle" id="roleToggle" style="display:none;margin-left:auto;">
       <button id="roleBtnPlayer" onclick="setRole('player')">Player</button>
       <button id="roleBtnGoalie" onclick="setRole('goalie')" style="display:none;">Goalie</button>
       <button id="roleBtnReferee" onclick="setRole('referee')" style="display:none;">Referee</button>
@@ -251,9 +269,16 @@
     <button class="btn ghost small" onclick="signOut()">Sign Out</button>
   </header>
 
-  <nav class="league-tabs" id="leagueTabs"></nav>
-
-  <main id="main"></main>
+  <div class="body-shell">
+    <aside class="sidebar">
+      <div class="sidebar-label">Menu</div>
+      <select id="tabsSelect" onchange="goTab(this.value)"></select>
+    </aside>
+    <div class="main-col">
+      <nav class="league-tabs" id="leagueTabs"></nav>
+      <main id="main"></main>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -645,14 +670,15 @@ function setRole(r){
   render();
 }
 function renderTabs(tabs){
-  const el = document.getElementById('tabs');
-  el.innerHTML = tabs.map(t=>`<button data-tab="${t.id}" class="${t.id===activeTab?'active':''}" onclick="goTab('${t.id}')">${t.label}</button>`).join('');
+  const el = document.getElementById('tabsSelect');
+  if(!el) return;
+  el.innerHTML = tabs.map(t=>`<option value="${t.id}" ${t.id===activeTab?'selected':''}>${t.label}</option>`).join('');
 }
 function goTab(id){
   activeTab = id;
   if(id!=='postice') editingGameId = null;
-  const tabs = tabsForRole(role);
-  [...document.querySelectorAll('#tabs button')].forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
+  const el = document.getElementById('tabsSelect');
+  if(el) el.value = id;
   if(id==='pastgames'){ openPastGames(); return; }
   render();
 }
