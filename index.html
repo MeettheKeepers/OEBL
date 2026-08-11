@@ -117,12 +117,37 @@
     position:sticky;top:73px;align-self:flex-start;
   }
   .sidebar-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:600;}
-  .sidebar select#tabsSelect{
-    width:100%;padding:13px 14px;border-radius:9px;border:1px solid var(--line);
-    background:var(--panel2);color:var(--text);font-size:14px;font-weight:600;
-    -webkit-appearance:menulist;appearance:menulist;cursor:pointer;
+  .menu-wrap{position:relative;z-index:31;}
+  .menu-trigger{
+    width:100%;display:flex;align-items:center;gap:11px;padding:13px 14px;border-radius:11px;
+    border:1px solid var(--line);background:linear-gradient(160deg,var(--panel2),var(--panel));
+    cursor:pointer;text-align:left;transition:border-color .15s ease,transform .1s ease;
   }
-  .sidebar select#tabsSelect:focus{outline:2px solid var(--teal);}
+  .menu-trigger:hover{border-color:var(--teal-dim);}
+  .menu-trigger.open{border-color:var(--teal);}
+  .menu-icon{
+    flex:none;width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--purple-dim),var(--teal-dim));font-size:15px;
+  }
+  .menu-trigger-text{flex:1;min-width:0;}
+  .mt-eyebrow{display:block;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:2px;}
+  .mt-current{display:block;font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .menu-chevron{flex:none;color:var(--muted);transition:transform .18s ease;}
+  .menu-trigger.open .menu-chevron{transform:rotate(180deg);color:var(--teal);}
+  .menu-dropdown{
+    display:none;position:absolute;top:calc(100% + 8px);left:0;right:0;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:0 16px 40px rgba(0,0,0,.18);max-height:70vh;overflow-y:auto;
+  }
+  .menu-dropdown.open{display:block;}
+  .menu-dropdown button{
+    display:block;width:100%;text-align:left;padding:12px 16px;background:transparent;border:none;
+    border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;font-weight:600;letter-spacing:.3px;
+  }
+  .menu-dropdown button:last-child{border-bottom:none;}
+  .menu-dropdown button:hover{background:var(--panel2);color:var(--text);}
+  .menu-dropdown button.active{background:var(--panel2);color:var(--teal);}
+  .menu-overlay{position:fixed;inset:0;z-index:29;display:none;background:transparent;}
   .main-col{flex:1;min-width:0;}
   @media(max-width:800px){
     .body-shell{flex-direction:column;}
@@ -272,13 +297,24 @@
   <div class="body-shell">
     <aside class="sidebar">
       <div class="sidebar-label">Menu</div>
-      <select id="tabsSelect" onchange="goTab(this.value)"></select>
+      <div class="menu-wrap">
+        <button type="button" class="menu-trigger" id="menuTrigger" onclick="toggleTabMenu()">
+          <span class="menu-icon">🏒</span>
+          <span class="menu-trigger-text">
+            <span class="mt-eyebrow">Section</span>
+            <span class="mt-current" id="menuCurrentLabel">Dashboard</span>
+          </span>
+          <svg class="menu-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="menu-dropdown" id="menuDropdown"></div>
+      </div>
     </aside>
     <div class="main-col">
       <nav class="league-tabs" id="leagueTabs"></nav>
       <main id="main"></main>
     </div>
   </div>
+  <div class="menu-overlay" id="menuOverlay" onclick="closeTabMenu()"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -383,6 +419,7 @@ let searchFilters = { name:'', minAge:'', maxAge:'', minSkill:'beginner', maxSki
 let selectedPlayerIds = []; // player ids selected in Message Players tab
 let leagueRules = null;   // league_rules row for activeLeague, or null if none set yet
 let editingRules = false; // commissioner: whether the Rules tab is showing the edit textarea
+let tabMenuOpen = false;  // whether the left sidebar's menu dropdown panel is currently open
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
@@ -670,15 +707,29 @@ function setRole(r){
   render();
 }
 function renderTabs(tabs){
-  const el = document.getElementById('tabsSelect');
-  if(!el) return;
-  el.innerHTML = tabs.map(t=>`<option value="${t.id}" ${t.id===activeTab?'selected':''}>${t.label}</option>`).join('');
+  const dropdown = document.getElementById('menuDropdown');
+  const label = document.getElementById('menuCurrentLabel');
+  if(!dropdown) return;
+  dropdown.innerHTML = tabs.map(t=>`<button type="button" class="${t.id===activeTab?'active':''}" onclick="goTab('${t.id}')">${t.label}</button>`).join('');
+  const current = tabs.find(t=>t.id===activeTab);
+  if(label) label.textContent = current ? current.label : '';
+}
+function toggleTabMenu(){ setTabMenuOpen(!tabMenuOpen); }
+function closeTabMenu(){ setTabMenuOpen(false); }
+function setTabMenuOpen(open){
+  tabMenuOpen = open;
+  const trigger = document.getElementById('menuTrigger');
+  const dropdown = document.getElementById('menuDropdown');
+  const overlay = document.getElementById('menuOverlay');
+  if(trigger) trigger.classList.toggle('open', open);
+  if(dropdown) dropdown.classList.toggle('open', open);
+  if(overlay) overlay.style.display = open ? 'block' : 'none';
 }
 function goTab(id){
   activeTab = id;
   if(id!=='postice') editingGameId = null;
-  const el = document.getElementById('tabsSelect');
-  if(el) el.value = id;
+  renderTabs(tabsForRole(role));
+  closeTabMenu();
   if(id==='pastgames'){ openPastGames(); return; }
   render();
 }
