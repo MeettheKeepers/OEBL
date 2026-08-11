@@ -481,13 +481,6 @@ async function enterApp(sess){
   await loadLeagueData();
   await initPush();
   setRole('player');
-  if(!me.has_seen_rules){
-    activeTab = 'rules';
-    renderTabs(tabsForRole('player'));
-    render();
-    me.has_seen_rules = true;
-    await sb.from('profiles').update({ has_seen_rules: true }).eq('id', me.id);
-  }
 }
 
 /* ================= PUSH NOTIFICATIONS ================= */
@@ -764,8 +757,20 @@ async function loadGoaliePhones(){
 function goaliePhoneFor(id){ return goaliePhones[id] || ''; }
 
 /* ================= RENDER ROUTER ================= */
+function needsOnboardingGate(){
+  return !((me.contact_phone||'').trim()) || !((me.contact_email||'').trim()) || !me.rules_acknowledged_at;
+}
 function render(){
   const main = document.getElementById('main');
+  const gated = needsOnboardingGate();
+  const hbtn = document.getElementById('hamburgerBtn');
+  const ltabs = document.getElementById('leagueTabs');
+  const rtoggle = document.getElementById('roleToggle');
+  if(hbtn) hbtn.style.display = gated ? 'none' : '';
+  if(ltabs) ltabs.style.display = gated ? 'none' : '';
+  if(gated && rtoggle) rtoggle.style.display = 'none';
+  else if(!gated) updateRoleToggleVisibility();
+  if(gated){ main.innerHTML = renderOnboardingGate(); return; }
   if(activeTab==='dashboard') main.innerHTML = renderDashboard();
   else if(activeTab==='announcements') main.innerHTML = renderAnnouncements();
   else if(activeTab==='profile') main.innerHTML = renderProfile();
@@ -786,6 +791,71 @@ function render(){
   else if(activeTab==='sellswap') main.innerHTML = renderSellSwap();
   else if(activeTab==='rules') main.innerHTML = renderRules();
   if(lightboxUrl) main.innerHTML += renderLightbox();
+}
+/* ---------- ONBOARDING GATE (contact info + rules acknowledgment) ---------- */
+function renderOnboardingGate(){
+  const agreement = (leagueRules && leagueRules.content) ? leagueRules.content : '';
+  const rules = (leagueRules && leagueRules.rules_content) ? leagueRules.rules_content : '';
+  return `
+  <div style="max-width:640px;margin:40px auto 0;">
+    <h2 class="section-title">Welcome to OBL</h2>
+    <p class="section-sub">Before you can access the rest of the app, please provide your contact info and confirm you've read the league agreement and rules below.</p>
+    <div class="panel" style="margin-bottom:16px;">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Contact Info</h3>
+      <div class="field"><label>Contact Phone <span style="color:var(--danger)">*</span></label><input id="gatePhone" type="tel" required value="${(me.contact_phone||'').replace(/"/g,'&quot;')}" placeholder="e.g. 613-555-0123"></div>
+      <div class="field"><label>Contact Email <span style="color:var(--danger)">*</span></label><input id="gateEmail" type="email" required value="${(me.contact_email||'').replace(/"/g,'&quot;')}" placeholder="e.g. you@example.com"></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px;background:rgba(79,209,217,.08);border-color:var(--teal-dim);">
+      <p style="margin:0;font-size:13px;">You must acknowledge that you have read and understood the terms and conditions of playing with OBL — check the box at the bottom of this page to confirm.</p>
+    </div>
+    <div class="panel" style="margin-bottom:16px;">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">League Agreement</h3>
+      ${agreement ? `<div style="white-space:pre-wrap;line-height:1.6;max-height:220px;overflow-y:auto;">${agreement.replace(/</g,'&lt;')}</div>` : `<p class="hint">No league agreement has been posted yet.</p>`}
+    </div>
+    <div class="panel" style="margin-bottom:16px;">
+      <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Rules</h3>
+      ${rules ? `<div style="white-space:pre-wrap;line-height:1.6;max-height:220px;overflow-y:auto;">${rules.replace(/</g,'&lt;')}</div>` : `<p class="hint">No rules have been posted yet.</p>`}
+    </div>
+    <div class="panel">
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+        <input type="checkbox" id="gateAckCheckbox" style="width:18px;height:18px;margin-top:2px;flex:none;" ${me.rules_acknowledged_at?'checked disabled':''}>
+        <span>I have read and understood the terms and conditions of playing with Ottawa Beer League (OBL).</span>
+      </label>
+      <button class="btn purple" style="margin-top:16px;width:auto;padding:12px 24px;" onclick="submitOnboardingGate()">Continue to OBL</button>
+      <div id="gateMsg" class="hint" style="min-height:16px;color:var(--danger);"></div>
+    </div>
+  </div>`;
+}
+async function submitOnboardingGate(){
+  const phoneEl = document.getElementById('gatePhone');
+  const emailEl = document.getElementById('gateEmail');
+  const ackEl = document.getElementById('gateAckCheckbox');
+  const msgEl = document.getElementById('gateMsg');
+  const phoneVal = (phoneEl.value||'').trim();
+  const emailVal = (emailEl.value||'').trim();
+  if(!phoneVal || !emailVal){
+    msgEl.textContent = 'Contact phone and email are both required.';
+    return;
+  }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)){
+    msgEl.textContent = 'Please enter a valid contact email.';
+    return;
+  }
+  if(!ackEl.checked){
+    msgEl.textContent = 'Please check the box confirming you have read the terms and conditions.';
+    return;
+  }
+  const payload = { contact_phone: phoneVal, contact_email: emailVal };
+  if(!me.rules_acknowledged_at) payload.rules_acknowledged_at = new Date().toISOString();
+  const { error } = await sb.from('profiles').update(payload).eq('id', me.id);
+  if(error){ msgEl.textContent = 'Save failed: '+error.message; return; }
+  me.contact_phone = phoneVal;
+  me.contact_email = emailVal;
+  if(payload.rules_acknowledged_at) me.rules_acknowledged_at = payload.rules_acknowledged_at;
+  showToast('Thanks — you\'re all set ✓');
+  activeTab = 'dashboard';
+  renderTabs(tabsForRole(role));
+  render();
 }
 function openLightbox(url){ lightboxUrl = url; render(); }
 function closeLightbox(){ lightboxUrl = null; render(); }
