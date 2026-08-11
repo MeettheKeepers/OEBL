@@ -946,7 +946,6 @@ function renderPlayerProfile(){
   <div class="panel grid cols-2">
     <div>
       <div class="field"><label>Name</label><input id="pName" value="${me.name||''}" oninput="me.name=this.value"></div>
-      <div class="field"><label>Login Email</label><input value="${me.email||''}" disabled></div>
       <div class="field"><label>Contact Phone <span style="color:var(--danger)">*</span></label><input id="pPhone" type="tel" required value="${me.contact_phone||''}" placeholder="e.g. 613-555-0123" oninput="me.contact_phone=this.value"></div>
       <div class="field"><label>Contact Email <span style="color:var(--danger)">*</span></label><input id="pContactEmail" type="email" required value="${me.contact_email||''}" placeholder="e.g. you@example.com" oninput="me.contact_email=this.value"></div>
       <div class="field"><label>Birthdate</label><input id="pBirthdate" type="date" value="${me.birthdate||''}" oninput="me.birthdate=this.value||null"></div>
