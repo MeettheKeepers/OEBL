@@ -21,14 +21,14 @@
     --panel:#121821;
     --panel2:#171f2b;
     --line:#232d3b;
-    --teal:#4fd1d9;
-    --teal-dim:#2f9aa1;
-    --purple:#8a4fd6;
-    --purple-dim:#6a2fc0;
+    --teal:#000000;
+    --teal-dim:#333333;
+    --purple:#000000;
+    --purple-dim:#333333;
     --text:#f4f7fa;
     --muted:#93a1b0;
-    --danger:#e05a5a;
-    --good:#4fd18a;
+    --danger:#000000;
+    --good:#000000;
     --header-bg:rgba(10,13,18,.92);
   }
   *{box-sizing:border-box;}
@@ -46,6 +46,7 @@
     min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;
     background:#000000;
     --bg:#000000;--panel:#000000;--panel2:#0e0e0e;--line:#2a2a2a;--text:#ffffff;--muted:#b3b3b3;
+    --teal:#4fd1d9;--teal-dim:#2f9aa1;--purple:#8a4fd6;--purple-dim:#6a2fc0;--danger:#e05a5a;--good:#4fd18a;
     padding:24px;
   }
   .card{
@@ -182,7 +183,7 @@
   .chip.on{background:var(--purple);border-color:var(--purple);color:#fff;}
   .toast{
     position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120%);
-    background:var(--good);color:#04241a;padding:12px 22px;border-radius:10px;font-weight:600;
+    background:#1a1a1a;color:#ffffff;padding:12px 22px;border-radius:10px;font-weight:600;
     transition:transform .25s ease;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.4);
   }
   .toast.show{transform:translateX(-50%) translateY(0);}
@@ -197,8 +198,8 @@
   .spots-bar{width:120px;height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px;}
   .spots-fill{height:100%;background:linear-gradient(90deg,var(--teal-dim),var(--teal));}
   .tag{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:600;margin-left:6px;white-space:nowrap;display:inline-block;line-height:1.4;}
-  .tag.pos{background:rgba(138,79,214,.22);color:var(--purple-dim);}
-  .tag.rank{background:rgba(79,209,217,.25);color:var(--teal-dim);}
+  .tag.pos{background:rgba(0,0,0,.06);color:var(--purple-dim);}
+  .tag.rank{background:rgba(0,0,0,.1);color:var(--teal-dim);}
 
   /* lines */
   .line-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
@@ -232,7 +233,7 @@
     transition:border-color .1s ease;
   }
   .player-card.selected{border-color:var(--purple);}
-  .player-card.unavailable{background:rgba(224,90,90,.18);}
+  .player-card.unavailable{background:rgba(0,0,0,.08);}
   .player-card .pc-name{font-weight:600;font-size:14px;margin-bottom:6px;}
   .player-card .pc-meta{font-size:12px;color:var(--muted);}
 
@@ -311,19 +312,19 @@ async function callAdmin(action, extra){
 const POSITIONS = ['LW','C','RW','LD','RD','G','REF'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const INJURY = {
-  green:  { label:'Green — Healthy', color:'#4fd18a' },
-  yellow: { label:'Yellow — Tweaked something, can play if needed', color:'#e0c34f' },
-  red:    { label:"Red — Can't play", color:'#e05a5a' },
+  green:  { label:'Green — Healthy', color:'#eef0f2' },
+  yellow: { label:'Yellow — Tweaked something, can play if needed', color:'#c7ccd2' },
+  red:    { label:"Red — Can't play", color:'#9aa1a8' },
 };
 const REF_STATUS = {
-  none:   { label:'No Ref Needed', color:'#4fd18a' },
-  wanted: { label:'Ref Wanted', color:'#e0c34f' },
-  needed: { label:'Ref Needed', color:'#e05a5a' },
+  none:   { label:'No Ref Needed', color:'#eef0f2' },
+  wanted: { label:'Ref Wanted', color:'#c7ccd2' },
+  needed: { label:'Ref Needed', color:'#9aa1a8' },
 };
 const GOALIE_STATUS = {
-  none:   { label:'No Goalie Needed', color:'#4fd18a' },
-  wanted: { label:'Goalie Wanted', color:'#e0c34f' },
-  needed: { label:'Goalie Needed', color:'#e05a5a' },
+  none:   { label:'No Goalie Needed', color:'#eef0f2' },
+  wanted: { label:'Goalie Wanted', color:'#c7ccd2' },
+  needed: { label:'Goalie Needed', color:'#9aa1a8' },
 };
 const GENDERS = ['Male','Female'];
 const SKILL_LEVELS = [['beginner','Beginner'],['intermediate','Intermediate'],['advanced','Advanced']];
@@ -805,7 +806,7 @@ function renderOnboardingGate(){
       <div class="field"><label>Contact Phone <span style="color:var(--danger)">*</span></label><input id="gatePhone" type="tel" required value="${(me.contact_phone||'').replace(/"/g,'&quot;')}" placeholder="e.g. 613-555-0123"></div>
       <div class="field"><label>Contact Email <span style="color:var(--danger)">*</span></label><input id="gateEmail" type="email" required value="${(me.contact_email||'').replace(/"/g,'&quot;')}" placeholder="e.g. you@example.com"></div>
     </div>
-    <div class="panel" style="margin-bottom:16px;background:rgba(79,209,217,.08);border-color:var(--teal-dim);">
+    <div class="panel" style="margin-bottom:16px;background:rgba(0,0,0,.04);border-color:var(--teal-dim);">
       <p style="margin:0;font-size:13px;">You must acknowledge that you have read and understood the terms and conditions of playing with OBL — check the box at the bottom of this page to confirm.</p>
     </div>
     <div class="panel" style="margin-bottom:16px;">
@@ -902,7 +903,7 @@ function renderRules(){
   return `
   <h2 class="section-title">League Agreement and Rules — ${activeLeague}</h2>
   <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league agreement and rules below.'}</p>
-  <div class="panel" style="margin-bottom:16px;background:rgba(79,209,217,.08);border-color:var(--teal-dim);">
+  <div class="panel" style="margin-bottom:16px;background:rgba(0,0,0,.04);border-color:var(--teal-dim);">
     <p style="margin:0;font-size:13px;">You must acknowledge that you have read and understood the terms and conditions of playing with OBL — check the box at the bottom of this page to confirm.</p>
   </div>
   <div class="panel" style="margin-bottom:16px;">
@@ -2696,7 +2697,7 @@ function renderRoster(){
       const age = calcAge(p.birthdate);
       const unavailable = isOnVacation(p);
       const daysLeft = daysUntilArchive(p);
-      return `<tr ${unavailable ? 'style="background:rgba(224,90,90,.16);"' : ''}>
+      return `<tr ${unavailable ? 'style="background:rgba(0,0,0,.06);"' : ''}>
         <td><a href="javascript:void(0)" onclick="openEditPlayer('${p.id}')" style="color:var(--teal);font-weight:600;text-decoration:underline;cursor:pointer;">${p.name}</a>${p.is_commissioner?' <span class="tag">Commissioner</span>':''}${p.claimed?'':' <span class="tag pos">Pending</span>'}${unavailable?' <span class="tag" style="background:var(--danger);color:#fff;">UNAVAILABLE</span>':''}</td>
         <td><select style="width:120px;" onchange="updatePlayerSkillLevel('${p.id}',this.value)">
           <option value="" ${!p.skill_level?'selected':''}>Not set</option>
@@ -2704,7 +2705,7 @@ function renderRoster(){
         </select></td>
         <td><input type="number" step="0.01" style="width:80px;" value="${(p.bankroll_cents/100).toFixed(2)}" onchange="updatePlayerBankroll('${p.id}',this.value)"></td>
         <td>${p.off_app_sale_count ? `<span class="tag" style="background:var(--danger);color:#fff;" title="Claimed 'sold off the app' this many times">${p.off_app_sale_count}</span>` : '0'}</td>
-        <td>${p.rules_acknowledged_at ? `<span class="tag" style="background:rgba(79,209,138,.22);color:var(--good);" title="Acknowledged ${new Date(p.rules_acknowledged_at).toLocaleString('en-US',{ month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}">${new Date(p.rules_acknowledged_at).toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric' })}</span>` : `<span class="tag" style="background:var(--danger);color:#fff;">Not yet</span>`}</td>
+        <td>${p.rules_acknowledged_at ? `<span class="tag" style="background:rgba(0,0,0,.06);color:var(--good);" title="Acknowledged ${new Date(p.rules_acknowledged_at).toLocaleString('en-US',{ month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}">${new Date(p.rules_acknowledged_at).toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric' })}</span>` : `<span class="tag" style="background:var(--danger);color:#fff;">Not yet</span>`}</td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
         <td>${(p.leagues||[]).length ? (p.leagues||[]).map(l=>`<span class="tag pos">${l}</span>`).join('') : '<span class="hint">—</span>'}</td>
