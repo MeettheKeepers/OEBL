@@ -196,7 +196,7 @@
   .ice-loc{color:var(--muted);font-size:13px;margin-top:2px;}
   .spots-bar{width:120px;height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px;}
   .spots-fill{height:100%;background:linear-gradient(90deg,var(--teal-dim),var(--teal));}
-  .tag{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:600;margin-left:6px;}
+  .tag{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:600;margin-left:6px;white-space:nowrap;display:inline-block;line-height:1.4;}
   .tag.pos{background:rgba(138,79,214,.22);color:var(--purple-dim);}
   .tag.rank{background:rgba(79,209,217,.25);color:var(--teal-dim);}
 
@@ -222,8 +222,10 @@
 
   /* roster table */
   table{width:100%;border-collapse:collapse;font-size:13px;}
-  th{text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:8px 10px;border-bottom:1px solid var(--line);}
-  td{padding:10px 10px;border-bottom:1px solid var(--line);}
+  th{text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  td{padding:10px 10px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -22px;padding:0 22px;}
+  .table-scroll table{min-width:1300px;}
 
   .player-card{
     background:var(--panel2);border:2px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;
@@ -2616,6 +2618,7 @@ function renderRoster(){
     </div>
   </div>
   <div class="panel">
+  <div class="table-scroll">
   <table>
     <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Off-App Sales</th><th>Rules Ack.</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
@@ -2655,6 +2658,7 @@ function renderRoster(){
       </tr>`;
     }).join('') : `<tr><td colspan="14" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
+  </div>
   </div>
   ${editingPlayerId ? renderEditPlayerModal() : ''}`;
 }
