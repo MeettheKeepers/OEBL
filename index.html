@@ -751,35 +751,45 @@ function renderLightbox(){
 
 /* ---------- RULES ---------- */
 function renderRules(){
-  const content = (leagueRules && leagueRules.content) ? leagueRules.content : '';
+  const agreement = (leagueRules && leagueRules.content) ? leagueRules.content : '';
+  const rules = (leagueRules && leagueRules.rules_content) ? leagueRules.rules_content : '';
   const editBtn = me.is_commissioner
-    ? `<button class="btn ghost small" onclick="editingRules=true; render();">Edit Rules</button>`
+    ? `<button class="btn ghost small" onclick="editingRules=true; render();">Edit</button>`
     : '';
   if(me.is_commissioner && editingRules){
     return `
-    <h2 class="section-title">League Rules — ${activeLeague}</h2>
+    <h2 class="section-title">League Agreement and Rules — ${activeLeague}</h2>
     <p class="section-sub">Players see this the first time they sign in, and can always come back to this tab. It's read-only for them.</p>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="field"><label>League Agreement</label><textarea id="rulesAgreementInput" rows="12" placeholder="Type the league agreement here...">${agreement}</textarea></div>
+    </div>
     <div class="panel">
-      <div class="field"><label>Rules</label><textarea id="rulesInput" rows="16" placeholder="Type the league rules here...">${content}</textarea></div>
-      <button class="btn purple" onclick="saveRules()">Save Rules</button>
+      <div class="field"><label>Rules</label><textarea id="rulesContentInput" rows="12" placeholder="Type the league rules here...">${rules}</textarea></div>
+      <button class="btn purple" onclick="saveRules()">Save</button>
       <button class="btn ghost" onclick="editingRules=false; render();">Cancel</button>
     </div>`;
   }
   return `
-  <h2 class="section-title">League Rules — ${activeLeague}</h2>
-  <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league rules below.'}</p>
-  <div class="panel">
+  <h2 class="section-title">League Agreement and Rules — ${activeLeague}</h2>
+  <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league agreement and rules below.'}</p>
+  <div class="panel" style="margin-bottom:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">League Agreement</h3>
     ${editBtn}
-    ${content ? `<div style="white-space:pre-wrap;line-height:1.6;${editBtn?'margin-top:12px;':''}">${content.replace(/</g,'&lt;')}</div>` : `<p class="hint">No rules have been posted yet.</p>`}
+    ${agreement ? `<div style="white-space:pre-wrap;line-height:1.6;${editBtn?'margin-top:12px;':''}">${agreement.replace(/</g,'&lt;')}</div>` : `<p class="hint">No league agreement has been posted yet.</p>`}
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Rules</h3>
+    ${rules ? `<div style="white-space:pre-wrap;line-height:1.6;">${rules.replace(/</g,'&lt;')}</div>` : `<p class="hint">No rules have been posted yet.</p>`}
   </div>`;
 }
 async function saveRules(){
-  const content = document.getElementById('rulesInput').value;
-  const { error } = await sb.from('league_rules').upsert({ league_id: activeLeague, content, updated_at: new Date().toISOString() }, { onConflict: 'league_id' });
-  if(error){ showToast('Failed to save rules: '+error.message); return; }
-  leagueRules = { league_id: activeLeague, content };
+  const content = document.getElementById('rulesAgreementInput').value;
+  const rules_content = document.getElementById('rulesContentInput').value;
+  const { error } = await sb.from('league_rules').upsert({ league_id: activeLeague, content, rules_content, updated_at: new Date().toISOString() }, { onConflict: 'league_id' });
+  if(error){ showToast('Failed to save: '+error.message); return; }
+  leagueRules = { league_id: activeLeague, content, rules_content };
   editingRules = false;
-  showToast('Rules saved ✓');
+  showToast('Saved ✓');
   render();
 }
 
