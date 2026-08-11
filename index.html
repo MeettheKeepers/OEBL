@@ -460,6 +460,7 @@ async function enterApp(sess){
   me.contact_phone = me.contact_phone || '';
   me.contact_email = me.contact_email || '';
   me.has_seen_rules = !!me.has_seen_rules;
+  me.rules_acknowledged_at = me.rules_acknowledged_at || null;
   if(!me.is_commissioner && me.leagues.length && !me.leagues.includes(activeLeague)){
     activeLeague = me.leagues[0];
   }
@@ -813,9 +814,25 @@ function renderRules(){
       <button class="btn ghost" onclick="editingRules=false; render();">Cancel</button>
     </div>`;
   }
+  const ackHTML = me.rules_acknowledged_at
+    ? `<div class="panel" style="margin-top:16px;border-color:var(--good);">
+        <div style="display:flex;align-items:center;gap:10px;color:var(--good);font-weight:600;">
+          <span>✓</span>
+          <span>Acknowledged on ${new Date(me.rules_acknowledged_at).toLocaleString('en-US',{ month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}</span>
+        </div>
+      </div>`
+    : `<div class="panel" style="margin-top:16px;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="rulesAckCheckbox" style="width:18px;height:18px;margin-top:2px;flex:none;" onchange="acknowledgeRules(this.checked)">
+          <span>I have read and understood the terms and conditions of playing with Ottawa Beer League (OBL).</span>
+        </label>
+      </div>`;
   return `
   <h2 class="section-title">League Agreement and Rules — ${activeLeague}</h2>
   <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league agreement and rules below.'}</p>
+  <div class="panel" style="margin-bottom:16px;background:rgba(79,209,217,.08);border-color:var(--teal-dim);">
+    <p style="margin:0;font-size:13px;">You must acknowledge that you have read and understood the terms and conditions of playing with OBL — check the box at the bottom of this page to confirm.</p>
+  </div>
   <div class="panel" style="margin-bottom:16px;">
     <h3 style="margin-top:0;font-size:15px;color:var(--teal)">League Agreement</h3>
     ${editBtn}
@@ -824,7 +841,17 @@ function renderRules(){
   <div class="panel">
     <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Rules</h3>
     ${rules ? `<div style="white-space:pre-wrap;line-height:1.6;">${rules.replace(/</g,'&lt;')}</div>` : `<p class="hint">No rules have been posted yet.</p>`}
-  </div>`;
+  </div>
+  ${ackHTML}`;
+}
+async function acknowledgeRules(checked){
+  if(!checked) return;
+  const ts = new Date().toISOString();
+  const { error } = await sb.from('profiles').update({ rules_acknowledged_at: ts }).eq('id', me.id);
+  if(error){ showToast('Failed to save acknowledgment: '+error.message); return; }
+  me.rules_acknowledged_at = ts;
+  showToast('Thanks — your acknowledgment has been recorded ✓');
+  render();
 }
 async function saveRules(){
   const content = document.getElementById('rulesAgreementInput').value;
@@ -2590,7 +2617,7 @@ function renderRoster(){
   </div>
   <div class="panel">
   <table>
-    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Off-App Sales</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Off-App Sales</th><th>Rules Ack.</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
       const inj = INJURY[p.injury_status||'green'];
       const age = calcAge(p.birthdate);
@@ -2604,6 +2631,7 @@ function renderRoster(){
         </select></td>
         <td><input type="number" step="0.01" style="width:80px;" value="${(p.bankroll_cents/100).toFixed(2)}" onchange="updatePlayerBankroll('${p.id}',this.value)"></td>
         <td>${p.off_app_sale_count ? `<span class="tag" style="background:var(--danger);color:#fff;" title="Claimed 'sold off the app' this many times">${p.off_app_sale_count}</span>` : '0'}</td>
+        <td>${p.rules_acknowledged_at ? `<span class="tag" style="background:rgba(79,209,138,.22);color:var(--good);" title="Acknowledged ${new Date(p.rules_acknowledged_at).toLocaleString('en-US',{ month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}">${new Date(p.rules_acknowledged_at).toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric' })}</span>` : `<span class="tag" style="background:var(--danger);color:#fff;">Not yet</span>`}</td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
         <td>${(p.leagues||[]).length ? (p.leagues||[]).map(l=>`<span class="tag pos">${l}</span>`).join('') : '<span class="hint">—</span>'}</td>
@@ -2625,7 +2653,7 @@ function renderRoster(){
           `}
         </td>
       </tr>`;
-    }).join('') : `<tr><td colspan="13" class="empty">No ${rosterView} players.</td></tr>`}
+    }).join('') : `<tr><td colspan="14" class="empty">No ${rosterView} players.</td></tr>`}
   </table>
   </div>
   ${editingPlayerId ? renderEditPlayerModal() : ''}`;
