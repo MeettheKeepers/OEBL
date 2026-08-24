@@ -401,6 +401,13 @@ let openIceGames = [];    // public ice_times across every league (Open Ice boar
 let openIceInterest = []; // game_interest rows for openIceGames
 let manageLeaguesList = []; // full leagues rows (incl. invite_code) — loaded only when Manage Leagues tab is open
 let newLeagueCommishSearch = ''; // search text for the "assign commissioner" player picker
+let leagueReviews = [];   // league_reviews rows for activeLeague
+let playerReviewsCache = {}; // subject_id -> array of player_reviews rows (loaded on demand from Lines/Roster)
+let removalRequests = []; // review_removal_requests rows (developer tab)
+let removalRequestReviews = { league:{}, player:{} }; // review_id -> review row, for rendering context in the queue
+let ratingTarget = null;  // { playerId, gameId, existing } when the Rate Player modal is open
+let ratingDraftRating = 0;
+let editPlayerReviews = []; // player_reviews rows for the player currently open in the commissioner edit-player modal
 let tabMenuOpen = false;  // whether the hamburger menu dropdown panel is currently open
 
 /* ================= HELPERS ================= */
@@ -414,6 +421,12 @@ function isGlobalCommish(){ return !!(me && me.is_commissioner && !(me.commissio
 function isScopedCommish(){ return !!(me && me.is_commissioner && me.commissioner_of && me.commissioner_of.length); }
 function planFor(code){ return (me && me.commissioner_plans && me.commissioner_plans[code||activeLeague]) || 'basic'; }
 function hasProAccess(){ return isGlobalCommish() || planFor(activeLeague)==='pro'; }
+function isDeveloper(){ return !!(me && me.is_developer); }
+function starsHTML(rating, size){
+  const r = Math.round(rating||0);
+  const s = size || '14px';
+  return `<span style="font-size:${s};letter-spacing:1px;color:#c9a227;">${'★'.repeat(r)}${'☆'.repeat(5-r)}</span>`;
+}
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2400);
@@ -481,6 +494,7 @@ async function enterApp(sess){
   me.contact_email = me.contact_email || '';
   me.has_seen_rules = !!me.has_seen_rules;
   me.rules_acknowledged_at = me.rules_acknowledged_at || null;
+  me.is_developer = !!me.is_developer;
   await loadAllLeagues();
   await loadCommissionerScope();
   if(isScopedCommish() && !me.commissioner_of.includes(activeLeague)){
@@ -613,7 +627,11 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules(), loadLeagueReviews()]);
+}
+async function loadLeagueReviews(){
+  const { data } = await sb.from('league_reviews').select('*').eq('league_id', activeLeague).order('created_at', { ascending:false });
+  leagueReviews = data || [];
 }
 async function loadRules(){
   const { data } = await sb.from('league_rules').select('*').eq('league_id', activeLeague).maybeSingle();
@@ -796,6 +814,74 @@ async function toggleCommissionerPlan(commissionerRowId, newPlan){
   await openManageLeagues();
 }
 
+/* ================= DEVELOPER TAB (Kyle + Andrew — review moderation queue) ================= */
+async function openDeveloperTab(){
+  const { data: reqs } = await sb.from('review_removal_requests').select('*').eq('status','pending').order('created_at');
+  removalRequests = reqs || [];
+  const leagueIds = removalRequests.filter(r=>r.review_type==='league').map(r=>r.review_id);
+  const playerIds = removalRequests.filter(r=>r.review_type==='player').map(r=>r.review_id);
+  removalRequestReviews = { league:{}, player:{} };
+  if(leagueIds.length){
+    const { data } = await sb.from('league_reviews').select('*').in('id', leagueIds);
+    (data||[]).forEach(r=> removalRequestReviews.league[r.id] = r);
+  }
+  if(playerIds.length){
+    const { data } = await sb.from('player_reviews').select('*').in('id', playerIds);
+    (data||[]).forEach(r=> removalRequestReviews.player[r.id] = r);
+  }
+  render();
+}
+function renderDeveloperTab(){
+  if(!isDeveloper()) return `<p class="hint">Not available.</p>`;
+  return `
+  <h2 class="section-title">Developer</h2>
+  <p class="section-sub">Tools beyond commissioner access — currently: review removal requests submitted by commissioners.</p>
+  <div class="panel">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Pending Removal Requests</h3>
+    ${removalRequests.length ? removalRequests.map(req=>{
+      const review = req.review_type==='league' ? removalRequestReviews.league[req.review_id] : removalRequestReviews.player[req.review_id];
+      const requester = playerById(req.requested_by);
+      let context = '<span class="hint">Review no longer exists.</span>';
+      if(review){
+        if(req.review_type==='league'){
+          const author = playerById(review.profile_id);
+          context = `${starsHTML(review.rating)} on <strong>${leagueName(review.league_id)}</strong> by ${author?author.name:'?'} — "${(review.review_text||'').replace(/</g,'&lt;')}"`;
+        } else {
+          const author = playerById(review.reviewer_id);
+          const subject = playerById(review.subject_id);
+          context = `${starsHTML(review.rating)} on <strong>${subject?subject.name:'?'}</strong> by ${author?author.name:'?'} — "${(review.review_text||'').replace(/</g,'&lt;')}"`;
+        }
+      }
+      return `<div class="panel" style="margin-bottom:10px;">
+        <div class="hint" style="margin-bottom:6px;">Requested by ${requester?requester.name:'?'} · ${new Date(req.created_at).toLocaleDateString()}</div>
+        <div style="margin-bottom:8px;">${context}</div>
+        ${req.reason ? `<div class="hint" style="margin-bottom:8px;">Reason: ${req.reason.replace(/</g,'&lt;')}</div>` : ''}
+        <div style="display:flex;gap:6px;">
+          <button class="btn purple small" onclick="resolveRemovalRequest('${req.id}','approved','${req.review_type}','${req.review_id}')">Approve — Delete Review</button>
+          <button class="btn ghost small" onclick="resolveRemovalRequest('${req.id}','denied',null,null)">Deny</button>
+        </div>
+      </div>`;
+    }).join('') : '<p class="hint">No pending requests.</p>'}
+  </div>`;
+}
+async function resolveRemovalRequest(reqId, status, reviewType, reviewId){
+  if(status==='approved' && reviewType && reviewId){
+    const table = reviewType==='league' ? 'league_reviews' : 'player_reviews';
+    const { error: delErr } = await sb.from(table).delete().eq('id', reviewId);
+    if(delErr){ showToast('Failed to delete review: '+delErr.message); return; }
+  }
+  const { error } = await sb.from('review_removal_requests').update({ status, resolved_at: new Date().toISOString(), resolved_by: me.id }).eq('id', reqId);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast(status==='approved' ? 'Review removed ✓' : 'Request denied');
+  await openDeveloperTab();
+}
+async function requestReviewRemoval(reviewType, reviewId){
+  const reason = prompt('Reason for removal (optional):') || null;
+  const { error } = await sb.from('review_removal_requests').insert({ review_type: reviewType, review_id: reviewId, requested_by: me.id, reason });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Removal request sent to Kyle/Andrew ✓');
+}
+
 /* ================= INVITE CODE JOIN (any player joins a private league) ================= */
 async function joinByInviteCode(){
   const el = document.getElementById('inviteCodeInput');
@@ -874,7 +960,10 @@ function adminTabs(){
   if(isGlobalCommish()) tabs.push({id:'manageleagues', label:'Manage Leagues'});
   return tabs;
 }
-function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : adminTabs(); }
+function tabsForRole(r){
+  const base = r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : adminTabs();
+  return isDeveloper() ? [...base, {id:'developer', label:'Developer'}] : base;
+}
 function updateRoleToggleVisibility(){
   const isRef = (me.positions||[]).includes('REF');
   const isGoalie = (me.positions||[]).includes('G');
@@ -925,6 +1014,7 @@ function goTab(id){
   if(id==='pastgames'){ openPastGames(); return; }
   if(id==='openice'){ openOpenIce(); return; }
   if(id==='manageleagues'){ openManageLeagues(); return; }
+  if(id==='developer'){ openDeveloperTab(); return; }
   render();
 }
 
@@ -1028,8 +1118,10 @@ function render(){
   else if(activeTab==='openice') main.innerHTML = renderOpenIce();
   else if(activeTab==='directory') main.innerHTML = renderPlayerDirectory();
   else if(activeTab==='manageleagues') main.innerHTML = renderManageLeagues();
+  else if(activeTab==='developer') main.innerHTML = renderDeveloperTab();
   else if(activeTab==='rules') main.innerHTML = renderRules();
   if(lightboxUrl) main.innerHTML += renderLightbox();
+  if(ratingTarget) main.innerHTML += renderRatePlayerModal();
 }
 /* ---------- ONBOARDING GATE (contact info + rules acknowledgment) ---------- */
 function renderOnboardingGate(){
@@ -1139,7 +1231,7 @@ function renderRules(){
         </label>
       </div>`;
   return `
-  <h2 class="section-title">League Agreement and Rules — ${activeLeague}</h2>
+  <h2 class="section-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">League Agreement and Rules — ${activeLeague} ${leagueReviews.length ? `${starsHTML(avgLeagueRating())}<span class="hint">(${leagueReviews.length} review${leagueReviews.length===1?'':'s'})</span>` : `<span class="hint">No reviews yet</span>`}</h2>
   <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league agreement and rules below.'}</p>
   <div class="panel" style="margin-bottom:16px;background:rgba(0,0,0,.04);border-color:var(--teal-dim);">
     <p style="margin:0;font-size:13px;">You must acknowledge that you have read and understood the terms and conditions of playing with OBL — check the box at the bottom of this page to confirm.</p>
@@ -1149,11 +1241,62 @@ function renderRules(){
     ${editBtn}
     ${agreement ? `<div style="white-space:pre-wrap;line-height:1.6;${editBtn?'margin-top:12px;':''}">${agreement.replace(/</g,'&lt;')}</div>` : `<p class="hint">No league agreement has been posted yet.</p>`}
   </div>
-  <div class="panel">
+  <div class="panel" style="margin-bottom:16px;">
     <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Rules</h3>
     ${rules ? `<div style="white-space:pre-wrap;line-height:1.6;">${rules.replace(/</g,'&lt;')}</div>` : `<p class="hint">No rules have been posted yet.</p>`}
   </div>
+  ${renderLeagueReviewsHTML()}
   ${ackHTML}`;
+}
+function avgLeagueRating(){
+  if(!leagueReviews.length) return 0;
+  return leagueReviews.reduce((a,r)=>a+r.rating,0) / leagueReviews.length;
+}
+function renderLeagueReviewsHTML(){
+  const mine = leagueReviews.find(r=>r.profile_id===me.id);
+  const canReview = (me.leagues||[]).includes(activeLeague);
+  return `
+  <div class="panel" style="margin-top:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">League Reviews ${leagueReviews.length ? starsHTML(avgLeagueRating()) : ''}</h3>
+    ${leagueReviews.length ? leagueReviews.map(r=>{
+      const author = playerById(r.profile_id);
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--line);">
+        <div class="row-flex" style="margin-bottom:4px;">
+          <strong style="font-size:13px;">${author?author.name:'Player'}</strong>
+          <span class="hint">${new Date(r.created_at).toLocaleDateString()}</span>
+        </div>
+        <div style="margin-bottom:4px;">${starsHTML(r.rating)}</div>
+        ${r.review_text ? `<div style="font-size:13px;">${r.review_text.replace(/</g,'&lt;')}</div>` : ''}
+        ${me.is_commissioner ? `<button class="btn ghost small" style="margin-top:6px;" onclick="requestReviewRemoval('league','${r.id}')">Request Removal</button>` : ''}
+      </div>`;
+    }).join('') : `<p class="hint">No reviews yet.</p>`}
+    ${canReview ? `
+    <div style="margin-top:14px;">
+      <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">${mine ? 'Update Your Review' : 'Write a Review'}</label>
+      <div class="chips" id="leagueRatingChips" style="margin:8px 0;">
+        ${[1,2,3,4,5].map(n=>`<div class="chip ${(mine && mine.rating===n)?'on':''}" data-rating="${n}" onclick="setLeagueReviewRating(${n})">${n}★</div>`).join('')}
+      </div>
+      <textarea id="leagueReviewText" rows="3" placeholder="Optional — share your experience with this league">${mine ? (mine.review_text||'') : ''}</textarea>
+      <button class="btn purple small" style="margin-top:8px;" onclick="submitLeagueReview()">Submit Review</button>
+    </div>` : `<p class="hint" style="margin-top:10px;">You can review a league after joining it.</p>`}
+  </div>`;
+}
+let leagueReviewDraftRating = 0;
+function setLeagueReviewRating(n){
+  leagueReviewDraftRating = n;
+  document.querySelectorAll('#leagueRatingChips .chip').forEach(el=>el.classList.toggle('on', Number(el.dataset.rating)===n));
+}
+async function submitLeagueReview(){
+  const mine = leagueReviews.find(r=>r.profile_id===me.id);
+  const rating = leagueReviewDraftRating || (mine ? mine.rating : 0);
+  if(!rating){ showToast('Pick a star rating first'); return; }
+  const review_text = document.getElementById('leagueReviewText').value.trim() || null;
+  const { error } = await sb.from('league_reviews').upsert({ league_id: activeLeague, profile_id: me.id, rating, review_text, updated_at: new Date().toISOString() }, { onConflict: 'league_id,profile_id' });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Review saved ✓');
+  leagueReviewDraftRating = 0;
+  await loadLeagueReviews();
+  render();
 }
 async function acknowledgeRules(checked){
   if(!checked) return;
@@ -2140,7 +2283,8 @@ function linesScreen(editable){
         return `<div class="slot"><div class="pos-lbl">${label}</div>
           <select onchange="setLineSlot('${teamKey}','${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
       }
-      return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p&&p.skill_level?`<span class="tag rank" title="${skillLevelLabel(p.skill_level)}">${skillLevelLabel(p.skill_level)[0]}</span>`:''}</div>`;
+      const canRate = p && p.id!==me.id;
+      return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p&&p.skill_level?`<span class="tag rank" title="${skillLevelLabel(p.skill_level)}">${skillLevelLabel(p.skill_level)[0]}</span>`:''}${canRate?`<a href="javascript:void(0)" class="hint" style="text-decoration:underline;margin-left:6px;" onclick="openRatePlayer('${p.id}','${game.id}')">Rate</a>`:''}</div>`;
     };
     const body = defs.map(section=>`
       ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
@@ -2188,6 +2332,68 @@ async function renameTeam(field, current){
   await loadIceTimes();
   render();
   showToast('Team renamed ✓');
+}
+
+/* ---------- PLAYER REVIEWS (rate a teammate from Lines) ---------- */
+async function openRatePlayer(playerId, gameId){
+  const { data } = await sb.from('player_reviews').select('*').eq('subject_id', playerId).eq('reviewer_id', me.id).maybeSingle();
+  ratingTarget = { playerId, gameId, existing: data || null };
+  ratingDraftRating = data ? data.rating : 0;
+  render();
+}
+function closeRatePlayer(){ ratingTarget = null; ratingDraftRating = 0; render(); }
+function setPlayerRatingStars(n){
+  ratingDraftRating = n;
+  document.querySelectorAll('#playerRatingChips .chip').forEach(el=>el.classList.toggle('on', Number(el.dataset.rating)===n));
+}
+function renderRatePlayerModal(){
+  const p = playerById(ratingTarget.playerId);
+  const existing = ratingTarget.existing;
+  return `
+  <div style="position:fixed;inset:0;background:rgba(10,13,18,.6);z-index:55;display:flex;align-items:center;justify-content:center;padding:24px;" onclick="if(event.target===this) closeRatePlayer()">
+    <div class="panel" style="max-width:420px;width:100%;margin:0;">
+      <div class="row-flex" style="margin-bottom:4px;">
+        <h2 class="section-title" style="margin-bottom:0;">Rate ${p?p.name:'Player'}</h2>
+        <button class="btn ghost small" onclick="closeRatePlayer()">✕</button>
+      </div>
+      <p class="section-sub">Only visible to you, ${p?p.name:'them'}, and commissioners.</p>
+      <div class="chips" id="playerRatingChips" style="margin:8px 0;">
+        ${[1,2,3,4,5].map(n=>`<div class="chip ${(existing && existing.rating===n)?'on':''}" data-rating="${n}" onclick="setPlayerRatingStars(${n})">${n}★</div>`).join('')}
+      </div>
+      <textarea id="playerReviewText" rows="3" placeholder="Optional — how was playing with them?">${existing ? (existing.review_text||'') : ''}</textarea>
+      <button class="btn purple small" style="margin-top:8px;" onclick="submitPlayerReview()">Submit</button>
+    </div>
+  </div>`;
+}
+async function submitPlayerReview(){
+  const rating = ratingDraftRating || (ratingTarget.existing ? ratingTarget.existing.rating : 0);
+  if(!rating){ showToast('Pick a star rating first'); return; }
+  const review_text = document.getElementById('playerReviewText').value.trim() || null;
+  const { error } = await sb.from('player_reviews').upsert({
+    subject_id: ratingTarget.playerId, reviewer_id: me.id, rating, review_text, game_id: ratingTarget.gameId, updated_at: new Date().toISOString(),
+  }, { onConflict: 'subject_id,reviewer_id' });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Rating saved ✓');
+  closeRatePlayer();
+}
+async function loadPlayerReviewsFor(playerId){
+  const { data } = await sb.from('player_reviews').select('*').eq('subject_id', playerId).order('created_at', { ascending:false });
+  editPlayerReviews = data || [];
+}
+function playerReviewsSectionHTML(){
+  if(!editPlayerReviews.length) return `<div class="field"><label>Player Reviews</label><p class="hint">No reviews yet.</p></div>`;
+  const avg = editPlayerReviews.reduce((a,r)=>a+r.rating,0) / editPlayerReviews.length;
+  return `<div class="field">
+    <label>Player Reviews ${starsHTML(avg)} <span class="hint">(${editPlayerReviews.length})</span></label>
+    ${editPlayerReviews.map(r=>{
+      const author = playerById(r.reviewer_id);
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;">
+        <div class="row-flex"><span>${starsHTML(r.rating)} — ${author?author.name:'?'}</span><span class="hint">${new Date(r.created_at).toLocaleDateString()}</span></div>
+        ${r.review_text ? `<div class="hint" style="margin-top:2px;">${r.review_text.replace(/</g,'&lt;')}</div>` : ''}
+        <button class="btn ghost small" style="margin-top:4px;" onclick="requestReviewRemoval('player','${r.id}')">Request Removal</button>
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
 /* ---------- STATS ---------- */
@@ -2797,6 +3003,7 @@ function renderSetStats(){
       <td>${p.name}</td>
       <td><input type="number" min="0" style="width:64px;" value="${s.goals}" onchange="setStat('${game.id}','${p.id}','goals',this.value)"></td>
       <td><input type="number" min="0" style="width:64px;" value="${s.assists}" onchange="setStat('${game.id}','${p.id}','assists',this.value)"></td>
+      <td>${(s.goals||s.assists) ? `<button class="btn ghost small" onclick="removeStat('${game.id}','${p.id}','${p.name.replace(/'/g,"\\'")}')">Remove</button>` : ''}</td>
     </tr>`;
   }).join('');
   return `
@@ -2805,7 +3012,7 @@ function renderSetStats(){
   <div class="field" style="max-width:320px;"><select onchange="activeStatsGameId=this.value;render()">${opts}</select></div>
   <div class="panel">
   <table>
-    <tr><th>Player</th><th>Goals</th><th>Assists</th></tr>
+    <tr><th>Player</th><th>Goals</th><th>Assists</th><th></th></tr>
     ${rows}
   </table>
   </div>`;
@@ -2820,6 +3027,14 @@ async function setStat(gameId, playerId, field, val){
   await loadStats();
   render();
   showToast('Stat updated ✓');
+}
+async function removeStat(gameId, playerId, playerName){
+  if(!confirm(`Remove ${playerName}'s stats for this game?`)) return;
+  const { error } = await sb.from('game_stats').delete().eq('game_id', gameId).eq('player_id', playerId);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadStats();
+  render();
+  showToast('Stat removed ✓');
 }
 
 /* ---------- ADMIN: ROSTER ---------- */
@@ -2995,10 +3210,12 @@ function renderRoster(){
   </div>
   ${editingPlayerId ? renderEditPlayerModal() : ''}`;
 }
-function openEditPlayer(id){
+async function openEditPlayer(id){
   const p = roster.find(r=>r.id===id);
   if(!p) return;
   editingPlayerId = id;
+  editPlayerReviews = [];
+  loadPlayerReviewsFor(id).then(render);
   editingDraft = {
     name: p.name || '',
     birthdate: p.birthdate || null,
@@ -3117,6 +3334,7 @@ function renderEditPlayerModal(){
         <button class="btn ghost small" onclick="closeEditPlayer()">✕ Close</button>
       </div>
       <p class="section-sub">Editing ${d.name}'s profile as commissioner. Changes save immediately to their account.</p>
+      ${playerReviewsSectionHTML()}
 
       <div class="grid cols-2">
         <div>
