@@ -353,6 +353,10 @@ const LEAGUES = [
   ['OSBL','Ottawa South Beer League'],
   ['OCBL','Ottawa Central Beer League'],
 ];
+// ALL_LEAGUES / LEAGUE_META are loaded from the `leagues` table (loadAllLeagues()) and include
+// any private leagues created for independent commissioners, on top of the original public ones.
+let ALL_LEAGUES = [...LEAGUES];
+let LEAGUE_META = []; // full leagues rows (id, name, is_private) — no invite_code (fetched separately when needed)
 // Per-game slot layout is built dynamically by buildSlotDefs() based on each game's format (see LINES section below).
 
 let authMode = 'signin'; // 'signin' | 'signup'
@@ -392,11 +396,24 @@ let searchFilters = { name:'', minAge:'', maxAge:'', minSkill:'beginner', maxSki
 let selectedPlayerIds = []; // player ids selected in Message Players tab
 let leagueRules = null;   // league_rules row for activeLeague, or null if none set yet
 let editingRules = false; // commissioner: whether the Rules tab is showing the edit textarea
+let gameInterest = [];    // game_interest rows for currently-loaded public ice times in activeLeague
+let openIceGames = [];    // public ice_times across every league (Open Ice board)
+let openIceInterest = []; // game_interest rows for openIceGames
+let manageLeaguesList = []; // full leagues rows (incl. invite_code) — loaded only when Manage Leagues tab is open
+let newLeagueCommishSearch = ''; // search text for the "assign commissioner" player picker
 let tabMenuOpen = false;  // whether the hamburger menu dropdown panel is currently open
 
 /* ================= HELPERS ================= */
 function playerById(id){ return roster.find(p=>p.id===id); }
-function leagueName(code){ const l = LEAGUES.find(x=>x[0]===(code||activeLeague)); return l ? l[1] : activeLeague; }
+function leagueName(code){ const l = ALL_LEAGUES.find(x=>x[0]===(code||activeLeague)); return l ? l[1] : activeLeague; }
+function leagueMeta(code){ return LEAGUE_META.find(l=>l.id===(code||activeLeague)); }
+function publicLeagues(){ return ALL_LEAGUES.filter(([code])=>{ const m=leagueMeta(code); return !m || !m.is_private; }); }
+// A commissioner with no league_commissioners rows is "global" (full access everywhere).
+// One with rows is "scoped" — only has commissioner powers within their own assigned league(s).
+function isGlobalCommish(){ return !!(me && me.is_commissioner && !(me.commissioner_of && me.commissioner_of.length)); }
+function isScopedCommish(){ return !!(me && me.is_commissioner && me.commissioner_of && me.commissioner_of.length); }
+function planFor(code){ return (me && me.commissioner_plans && me.commissioner_plans[code||activeLeague]) || 'basic'; }
+function hasProAccess(){ return isGlobalCommish() || planFor(activeLeague)==='pro'; }
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2400);
@@ -464,7 +481,11 @@ async function enterApp(sess){
   me.contact_email = me.contact_email || '';
   me.has_seen_rules = !!me.has_seen_rules;
   me.rules_acknowledged_at = me.rules_acknowledged_at || null;
-  if(!me.is_commissioner && me.leagues.length && !me.leagues.includes(activeLeague)){
+  await loadAllLeagues();
+  await loadCommissionerScope();
+  if(isScopedCommish() && !me.commissioner_of.includes(activeLeague)){
+    activeLeague = me.commissioner_of[0];
+  } else if(!me.is_commissioner && me.leagues.length && !me.leagues.includes(activeLeague)){
     activeLeague = me.leagues[0];
   }
   document.getElementById('signin').style.display='none';
@@ -550,13 +571,30 @@ async function disablePush(){
 }
 
 /* ================= LEAGUES ================= */
+async function loadAllLeagues(){
+  // Uses the leagues_public view (id/name/is_private only) — invite_code is never exposed here.
+  const { data } = await sb.from('leagues_public').select('*').order('id');
+  if(data && data.length){ LEAGUE_META = data; ALL_LEAGUES = data.map(l=>[l.id, l.name]); }
+}
+async function loadCommissionerScope(){
+  me.commissioner_of = [];
+  me.commissioner_plans = {};
+  if(!me.is_commissioner){ return; }
+  const { data } = await sb.from('league_commissioners').select('*').eq('profile_id', me.id);
+  (data||[]).forEach(row=>{ me.commissioner_of.push(row.league_id); me.commissioner_plans[row.league_id] = row.plan; });
+}
 function visibleLeagues(){
-  // Commissioners always manage every league. Everyone else only sees the tab(s)
-  // for the league(s) they picked on their profile (falls back to all if none set).
-  if(me && me.is_commissioner) return LEAGUES;
+  // Global commissioners manage every league. Scoped (independent) commissioners only see
+  // their own assigned private league(s), plus any public league they've personally joined.
+  // Everyone else only sees the tab(s) for the league(s) they picked on their profile.
+  if(isGlobalCommish()) return ALL_LEAGUES;
+  if(isScopedCommish()){
+    const mine = new Set([...(me.commissioner_of||[]), ...((me.leagues)||[])]);
+    return ALL_LEAGUES.filter(([code])=> mine.has(code));
+  }
   const mine = (me && me.leagues) || [];
-  const filtered = LEAGUES.filter(([code])=> mine.includes(code));
-  return filtered.length ? filtered : LEAGUES;
+  const filtered = ALL_LEAGUES.filter(([code])=> mine.includes(code));
+  return filtered.length ? filtered : publicLeagues();
 }
 function renderLeagueTabs(){
   const el = document.getElementById('leagueTabs');
@@ -594,6 +632,185 @@ async function loadAnnouncements(){
   announcements = data || [];
 }
 
+/* ================= OPEN ICE BOARD (public cross-league games) ================= */
+async function openOpenIce(){
+  const { data: games } = await sb.from('ice_times').select('*').eq('visibility','public').eq('archived', false).order('game_date');
+  openIceGames = games || [];
+  const ids = openIceGames.map(g=>g.id);
+  if(ids.length){
+    const { data: gi } = await sb.from('game_interest').select('*').in('ice_time_id', ids);
+    openIceInterest = gi || [];
+  } else openIceInterest = [];
+  render();
+}
+function renderOpenIce(){
+  return `
+  <h2 class="section-title">Open Ice</h2>
+  <p class="section-sub">Games posted publicly by Pro commissioners across every league — express interest to help a commissioner fill their roster.</p>
+  ${openIceGames.length ? openIceGames.map(g=>{
+    const interested = openIceInterest.filter(x=>x.ice_time_id===g.id);
+    const iAmIn = interested.some(x=>x.profile_id===me.id);
+    return `<div class="panel" style="margin-bottom:10px;padding:14px 16px;">
+      <div class="row-flex" style="margin-bottom:6px;flex-wrap:wrap;">
+        <strong style="font-size:13px;">${g.date_label} — ${g.location}</strong>
+        <span class="tag pos">${leagueName(g.league_id)}</span>
+      </div>
+      <div class="hint" style="margin-bottom:8px;">${g.time_label||''}${g.cost_cents!=null?` · $${(g.cost_cents/100).toFixed(2)}`:''}</div>
+      <div class="hint" style="margin-bottom:10px;">${interested.length} player${interested.length===1?'':'s'} interested${interested.length?': '+interested.map(x=>{const p=playerById(x.profile_id);return p?p.name:'?';}).join(', '):''}</div>
+      <button class="btn ${iAmIn?'ghost':'purple'} small" onclick="toggleGameInterest('${g.id}', ${!iAmIn})">${iAmIn ? "I'm no longer interested" : "I'm Interested"}</button>
+    </div>`;
+  }).join('') : '<p class="hint">No public games posted right now — check back soon.</p>'}
+  `;
+}
+async function toggleGameInterest(iceTimeId, wantIn){
+  if(wantIn){
+    const { error } = await sb.from('game_interest').insert({ ice_time_id: iceTimeId, profile_id: me.id });
+    if(error){ showToast('Failed: '+error.message); return; }
+    showToast("You're on the list ✓");
+  } else {
+    const { error } = await sb.from('game_interest').delete().eq('ice_time_id', iceTimeId).eq('profile_id', me.id);
+    if(error){ showToast('Failed: '+error.message); return; }
+    showToast('Removed');
+  }
+  await openOpenIce();
+}
+
+/* ================= PLAYER DIRECTORY (Pro-plan / global commissioners) ================= */
+function renderPlayerDirectory(){
+  if(!hasProAccess()){
+    return `<h2 class="section-title">Player Directory</h2><p class="section-sub">Browsing every player in the app to recruit for your league is a Pro feature. See Manage Leagues to upgrade.</p>`;
+  }
+  const q = (searchFilters.directoryQuery||'').trim().toLowerCase();
+  const list = roster.filter(p=> !p.archived_at && (!q || p.name.toLowerCase().includes(q)));
+  return `
+  <h2 class="section-title">Player Directory</h2>
+  <p class="section-sub">Every player in the app. Add anyone to ${leagueName()} to recruit them into your league.</p>
+  <div class="field" style="max-width:320px;margin-bottom:16px;">
+    <label>Search by name</label>
+    <input value="${(searchFilters.directoryQuery||'').replace(/"/g,'&quot;')}" oninput="searchFilters.directoryQuery=this.value;render()" placeholder="e.g. Alex">
+  </div>
+  <div class="panel"><div class="table-scroll">
+    <table><thead><tr><th>Name</th><th>Skill Level</th><th>Positions</th><th>Current Leagues</th><th>Action</th></tr></thead>
+    <tbody>
+    ${list.map(p=>{
+      const already = (p.leagues||[]).includes(activeLeague);
+      return `<tr>
+        <td>${p.name}</td>
+        <td>${p.skill_level || '—'}</td>
+        <td>${(p.positions||[]).join(', ') || '—'}</td>
+        <td>${(p.leagues||[]).join(', ') || '—'}</td>
+        <td>${already ? `<span class="tag pos">Already in ${activeLeague}</span>` : `<button class="btn ghost small" onclick="addPlayerToMyLeague('${p.id}','${p.name.replace(/'/g,"\\'")}')">Add to ${activeLeague}</button>`}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="5" class="hint">No players match.</td></tr>`}
+    </tbody></table>
+  </div></div>`;
+}
+async function addPlayerToMyLeague(playerId, playerName){
+  const p = playerById(playerId);
+  if(!p) return;
+  const leagues = Array.from(new Set([...(p.leagues||[]), activeLeague]));
+  const { error } = await sb.from('profiles').update({ leagues }).eq('id', playerId);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast(`${playerName} added to ${leagueName()} ✓`);
+  await loadRoster();
+  render();
+}
+
+/* ================= MANAGE LEAGUES (true global commissioners only) ================= */
+async function openManageLeagues(){
+  const [{ data: leagues }, { data: commish }] = await Promise.all([
+    sb.from('leagues').select('*').order('created_at'),
+    sb.from('league_commissioners').select('*'),
+  ]);
+  manageLeaguesList = (leagues||[]).map(l=>({ ...l, commish: (commish||[]).filter(c=>c.league_id===l.id) }));
+  render();
+}
+function renderManageLeagues(){
+  if(!isGlobalCommish()) return `<p class="hint">Not available.</p>`;
+  const privateLeagues = manageLeaguesList.filter(l=>l.is_private);
+  return `
+  <h2 class="section-title">Manage Leagues</h2>
+  <p class="section-sub">Create a private league for an independent commissioner. Basic is free (their own private league only); Pro ($10/mo) unlocks the full Player Directory and public Open Ice postings. Until Stripe billing is wired up, toggle each commissioner's plan manually here.</p>
+  <div class="panel" style="margin-bottom:16px;max-width:480px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Create a Private League</h3>
+    <div class="field"><label>League Name</label><input id="newLeagueName" placeholder="e.g. Kanata Thursday League"></div>
+    <div class="field"><label>Assign Commissioner</label>
+      <select id="newLeagueCommishId">
+        <option value="">— choose a player —</option>
+        ${roster.filter(p=>!p.archived_at).map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn purple" onclick="createPrivateLeague()">Create League</button>
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Private Leagues</h3>
+    ${privateLeagues.length ? privateLeagues.map(l=>{
+      const c = l.commish[0];
+      const commishPlayer = c ? playerById(c.profile_id) : null;
+      const plan = c ? c.plan : 'basic';
+      return `<div class="panel" style="margin-bottom:10px;">
+        <div class="row-flex" style="flex-wrap:wrap;margin-bottom:6px;">
+          <strong>${l.name}</strong><span class="tag">${l.id}</span>
+        </div>
+        <div class="hint" style="margin-bottom:6px;">Commissioner: ${commishPlayer ? commishPlayer.name : '— unassigned —'}</div>
+        <div class="hint" style="margin-bottom:6px;">Invite code: <strong>${l.invite_code||'—'}</strong> — share this with players so they can join.</div>
+        <div class="hint" style="margin-bottom:10px;">Plan: <span class="tag ${plan==='pro'?'pos':''}">${plan==='pro'?'Pro ($10/mo)':'Basic (Free)'}</span></div>
+        ${c ? `<button class="btn ghost small" onclick="toggleCommissionerPlan('${c.id}','${plan==='pro'?'basic':'pro'}')">Switch to ${plan==='pro'?'Basic':'Pro'}</button>` : ''}
+      </div>`;
+    }).join('') : '<p class="hint">No private leagues yet.</p>'}
+  </div>`;
+}
+function slugifyLeagueCode(name){
+  const base = (name||'').toUpperCase().replace(/[^A-Z]/g,'').slice(0,6) || 'LEAGUE';
+  const suffix = Math.random().toString(36).slice(2,4).toUpperCase();
+  return base + suffix;
+}
+function randomInviteCode(){
+  return Math.random().toString(36).slice(2,10).toUpperCase();
+}
+async function createPrivateLeague(){
+  const nameEl = document.getElementById('newLeagueName');
+  const commishEl = document.getElementById('newLeagueCommishId');
+  const name = (nameEl.value||'').trim();
+  const commishId = commishEl.value;
+  if(!name){ showToast('Enter a league name'); return; }
+  if(!commishId){ showToast('Choose a commissioner'); return; }
+  const id = slugifyLeagueCode(name);
+  const invite_code = randomInviteCode();
+  const { error: leagueErr } = await sb.from('leagues').insert({ id, name, is_private: true, owner_id: commishId, invite_code });
+  if(leagueErr){ showToast('Failed: '+leagueErr.message); return; }
+  const { error: commishErr } = await sb.from('league_commissioners').insert({ league_id: id, profile_id: commishId, plan: 'basic' });
+  if(commishErr){ showToast('Failed: '+commishErr.message); return; }
+  const commishPlayer = playerById(commishId);
+  const leaguesArr = Array.from(new Set([...(commishPlayer && commishPlayer.leagues || []), id]));
+  await sb.from('profiles').update({ is_commissioner: true, leagues: leaguesArr }).eq('id', commishId);
+  showToast(`${name} created ✓ — invite code ${invite_code}`);
+  await loadRoster();
+  await loadAllLeagues();
+  await openManageLeagues();
+}
+async function toggleCommissionerPlan(commissionerRowId, newPlan){
+  const { error } = await sb.from('league_commissioners').update({ plan: newPlan, plan_updated_at: new Date().toISOString() }).eq('id', commissionerRowId);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast(`Plan switched to ${newPlan==='pro'?'Pro':'Basic'} ✓`);
+  await openManageLeagues();
+}
+
+/* ================= INVITE CODE JOIN (any player joins a private league) ================= */
+async function joinByInviteCode(){
+  const el = document.getElementById('inviteCodeInput');
+  const msgEl = document.getElementById('inviteCodeMsg');
+  const code = (el.value||'').trim();
+  if(!code){ if(msgEl) msgEl.textContent = 'Enter an invite code.'; return; }
+  const { data, error } = await sb.rpc('redeem_invite_code', { p_code: code });
+  if(error || !data || !data.ok){ if(msgEl) msgEl.textContent = (data && data.error) || 'Failed: '+(error?error.message:'unknown error'); return; }
+  if(!(me.leagues||[]).includes(data.league_id)) me.leagues = [...(me.leagues||[]), data.league_id];
+  showToast(data.already ? `You're already in ${data.league_name}.` : `Joined ${data.league_name} ✓`);
+  await loadAllLeagues();
+  renderLeagueTabs();
+  render();
+}
+
 async function signOut(){
   await sb.auth.signOut();
   session = null; me = null;
@@ -614,6 +831,7 @@ const PLAYER_TABS = [
   {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'openice', label:'Open Ice'},
   {id:'rules', label:'Rules'},
 ];
 const GOALIE_TABS = [
@@ -622,6 +840,7 @@ const GOALIE_TABS = [
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'openice', label:'Open Ice'},
   {id:'rules', label:'Rules'},
 ];
 const REFEREE_TABS = [
@@ -630,23 +849,32 @@ const REFEREE_TABS = [
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
   {id:'sellswap', label:'Sell/Swap'},
+  {id:'openice', label:'Open Ice'},
   {id:'rules', label:'Rules'},
 ];
-const ADMIN_TABS = [
-  {id:'announcements', label:'Announcements'},
-  {id:'postice', label:'Post Ice Time'},
-  {id:'setlines', label:'Set Lines'},
-  {id:'setstats', label:'Set Stats'},
-  {id:'roster', label:'Roster'},
-  {id:'message', label:'Player Finder'},
-  {id:'goalieroster', label:'Goalie Roster'},
-  {id:'refroster', label:'Referee Roster'},
-  {id:'pastgames', label:'Past Games'},
-  {id:'merch', label:'Merch'},
-  {id:'sellswap', label:'Sell/Swap'},
-  {id:'rules', label:'Rules'},
-];
-function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : ADMIN_TABS; }
+// Admin tabs are built dynamically: Player Directory only shows for Pro-plan (or global) commissioners,
+// and Manage Leagues only shows for true global commissioners (not scoped/independent ones).
+function adminTabs(){
+  const tabs = [
+    {id:'announcements', label:'Announcements'},
+    {id:'postice', label:'Post Ice Time'},
+    {id:'setlines', label:'Set Lines'},
+    {id:'setstats', label:'Set Stats'},
+    {id:'roster', label:'Roster'},
+    {id:'message', label:'Player Finder'},
+    {id:'goalieroster', label:'Goalie Roster'},
+    {id:'refroster', label:'Referee Roster'},
+    {id:'pastgames', label:'Past Games'},
+    {id:'merch', label:'Merch'},
+    {id:'sellswap', label:'Sell/Swap'},
+    {id:'openice', label:'Open Ice'},
+    {id:'rules', label:'Rules'},
+  ];
+  if(hasProAccess()) tabs.splice(6, 0, {id:'directory', label:'Player Directory'});
+  if(isGlobalCommish()) tabs.push({id:'manageleagues', label:'Manage Leagues'});
+  return tabs;
+}
+function tabsForRole(r){ return r==='player' ? PLAYER_TABS : r==='goalie' ? GOALIE_TABS : r==='referee' ? REFEREE_TABS : adminTabs(); }
 function updateRoleToggleVisibility(){
   const isRef = (me.positions||[]).includes('REF');
   const isGoalie = (me.positions||[]).includes('G');
@@ -695,6 +923,8 @@ function goTab(id){
   renderTabs(tabsForRole(role));
   closeTabMenu();
   if(id==='pastgames'){ openPastGames(); return; }
+  if(id==='openice'){ openOpenIce(); return; }
+  if(id==='manageleagues'){ openManageLeagues(); return; }
   render();
 }
 
@@ -716,6 +946,11 @@ async function loadIceTimes(){
   refWaitlist = wl || [];
   goalieWaitlist = gwl || [];
   freeAgentList = fal || [];
+  const publicIds = iceTimes.filter(g=>g.visibility==='public').map(g=>g.id);
+  if(publicIds.length){
+    const { data: gi } = await sb.from('game_interest').select('*').in('ice_time_id', publicIds);
+    gameInterest = gi || [];
+  } else gameInterest = [];
   if(activeGameId && !iceTimes.find(g=>g.id===activeGameId)) activeGameId = null;
   if(iceTimes.length && !activeGameId) activeGameId = iceTimes[0].id;
   if(activeGameId) await loadLines(activeGameId);
@@ -790,6 +1025,9 @@ function render(){
   else if(activeTab==='goalieroster') main.innerHTML = renderGoalieRoster();
   else if(activeTab==='pastgames') main.innerHTML = renderPastGames();
   else if(activeTab==='sellswap') main.innerHTML = renderSellSwap();
+  else if(activeTab==='openice') main.innerHTML = renderOpenIce();
+  else if(activeTab==='directory') main.innerHTML = renderPlayerDirectory();
+  else if(activeTab==='manageleagues') main.innerHTML = renderManageLeagues();
   else if(activeTab==='rules') main.innerHTML = renderRules();
   if(lightboxUrl) main.innerHTML += renderLightbox();
 }
@@ -1065,9 +1303,18 @@ function renderPlayerProfile(){
       <div class="field">
         <label>Leagues you play in</label>
         <div class="chips" id="leagueChips">
-          ${LEAGUES.map(([code,name])=>`<div class="chip ${(me.leagues||[]).includes(code)?'on':''}" onclick="toggleLeague('${code}')" title="${name}">${code}</div>`).join('')}
+          ${publicLeagues().map(([code,name])=>`<div class="chip ${(me.leagues||[]).includes(code)?'on':''}" onclick="toggleLeague('${code}')" title="${name}">${code}</div>`).join('')}
         </div>
         <div class="hint" style="margin-top:6px;">You'll only show up on the Roster for the league(s) you select here. Pick just one if you only play in one league.</div>
+      </div>
+      <div class="field" style="max-width:280px;">
+        <label>Have an invite code?</label>
+        <div style="display:flex;gap:8px;">
+          <input id="inviteCodeInput" placeholder="e.g. AB12CD34" style="text-transform:uppercase;">
+          <button type="button" class="btn ghost small" onclick="joinByInviteCode()">Join</button>
+        </div>
+        <div class="hint" style="margin-top:4px;">Independent commissioners running a private league will share a code with you — enter it here to get access.</div>
+        <div id="inviteCodeMsg" class="hint" style="color:var(--danger);min-height:16px;"></div>
       </div>
       <button class="btn purple" style="margin-top:10px" onclick="saveProfile()">Save Profile</button>
     </div>
@@ -2302,6 +2549,7 @@ function renderPostIce(){
   if(editingGameId && !editGame) editingGameId = null;
   const refStatusVal = editGame ? (editGame.ref_status||'none') : 'none';
   const goalieStatusVal = editGame ? (editGame.goalie_status||'none') : 'none';
+  const visibilityVal = editGame ? (editGame.visibility||'private') : 'private';
   return `
   <h2 class="section-title">${editGame ? 'Edit Ice Time' : 'Post New Ice Time'} — ${activeLeague}</h2>
   <p class="section-sub">${editGame ? `Editing ${iceTimeLabel(editGame)}. Changes save to this existing game — sign-ups, lines, and stats are kept.` : `Open a new session for ${leagueName()} players to sign up for.`}</p>
@@ -2310,6 +2558,14 @@ function renderPostIce(){
   ${manageArenasHTML()}
   <div class="panel grid cols-2">
     <div>
+      ${hasProAccess() ? `
+      <div class="field"><label>Visibility</label>
+        <select id="newVisibility">
+          <option value="private" ${visibilityVal==='private'?'selected':''}>Private — only ${leagueName()} players</option>
+          <option value="public" ${visibilityVal==='public'?'selected':''}>Public — listed on the app-wide Open Ice board</option>
+        </select>
+        <div class="hint">Public games are visible to every player in the app, not just yours — a Pro feature.</div>
+      </div>` : `<div class="hint" style="margin-bottom:14px;">Want to post this game publicly to find players from outside ${leagueName()}? That's a Pro feature — see Manage Leagues.</div>`}
       <div class="field"><label>Location</label><select id="newLoc">${arenas.map(a=>`<option ${editGame && editGame.location===a.name?'selected':''}>${a.name}</option>`).join('')}</select></div>
       <div class="field"><label>Date</label><input id="newDate" type="date" value="${editGame?editGame.game_date:''}"></div>
       <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM" value="${editGame?(editGame.time_label||''):''}"></div>
@@ -2417,7 +2673,10 @@ function renderPostIce(){
         <div class="hint" style="margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
           ${s.cost_cents!=null ? `<span class="tag">Cost: $${(s.cost_cents/100).toFixed(2)}</span>` : ''}
           ${skillLabel ? `<span class="tag pos">${skillLabel}</span>` : ''}
+          ${s.visibility==='public' ? `<span class="tag pos">Public — Open Ice board</span>` : ''}
         </div>
+        ${s.visibility==='public' ? (()=>{ const interested = gameInterest.filter(x=>x.ice_time_id===s.id);
+          return `<div class="hint" style="margin-bottom:6px;">${interested.length} interested from Open Ice${interested.length?': '+interested.map(x=>{ const p=playerById(x.profile_id); return p?p.name:'?'; }).join(', '):''}</div>`; })() : ''}
         <div class="hint" style="margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
           <span>Ref: ${refName}</span>
           <span class="tag" style="background:${rs.color};color:#04241a;">${rs.label}</span>
@@ -2480,10 +2739,13 @@ async function postIce(){
   const cost_cents = (costEl && costEl.value !== '') ? Math.round(Number(costEl.value)*100) : null;
   const min_skill_level = document.getElementById('newMinSkill').value || null;
   const max_skill_level = document.getElementById('newMaxSkill').value || null;
+  const visibilityEl = document.getElementById('newVisibility');
+  const visibility = (hasProAccess() && visibilityEl) ? visibilityEl.value : 'private';
   const payload = {
     date_label, game_date, time_label, location, max_spots, cost_cents, min_skill_level, max_skill_level,
     fwd_lines: fmt.fwd_lines, def_pairs: fmt.def_pairs, goalies: fmt.goalies, ref_status, ref_budget_cents,
     goalie_status, goalie_budget_cents, goalie_count, goalie_gender_pref, goalie_caliber, goalie_min_skill_level, goalie_max_skill_level,
+    visibility,
   };
   if(editingGameId){
     const { error } = await sb.from('ice_times').update(payload).eq('id', editingGameId);
@@ -2583,7 +2845,7 @@ function availabilityAggregate(list){
 }
 function activeRoster(){ return roster.filter(p=>!p.archived_at); }
 function rosterForLeague(list){
-  if(rosterShowAllLeagues) return list;
+  if(rosterShowAllLeagues && isGlobalCommish()) return list;
   return list.filter(p=> (p.leagues||[]).includes(activeLeague));
 }
 function isOnVacation(p, dateStr){
