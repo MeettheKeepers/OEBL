@@ -1187,6 +1187,7 @@ async function submitOnboardingGate(){
   activeTab = 'dashboard';
   renderTabs(tabsForRole(role));
   render();
+  if(pushStatus==='not-subscribed'){ enablePush(); }
 }
 function openLightbox(url){ lightboxUrl = url; render(); }
 function closeLightbox(){ lightboxUrl = null; render(); }
@@ -2797,7 +2798,7 @@ function renderPostIce(){
       <div class="field"><label>Location</label><select id="newLoc">${arenas.map(a=>`<option ${editGame && editGame.location===a.name?'selected':''}>${a.name}</option>`).join('')}</select></div>
       <div class="field"><label>Date</label><input id="newDate" type="date" value="${editGame?editGame.game_date:''}"></div>
       <div class="field"><label>Time</label><input id="newTime" placeholder="e.g. 9:00–10:15 PM" value="${editGame?(editGame.time_label||''):''}"></div>
-      <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="${editGame?editGame.max_spots:18}"></div>
+      <div class="field"><label>Max Spots</label><input id="newMax" type="number" value="${editGame?editGame.max_spots:22}"></div>
       <div class="field"><label>Cost to Play ($)</label><input id="newCost" type="number" min="0" step="0.01" placeholder="e.g. 15" value="${editGame && editGame.cost_cents!=null ? (editGame.cost_cents/100).toFixed(2) : ''}"></div>
       <div class="hint" style="margin-top:-8px;margin-bottom:14px;">Leave blank for a free session. Deducted from a player's bank roll the moment they claim a spot.</div>
       <div class="field"><label>Min Skill Level Required</label>
@@ -2948,7 +2949,7 @@ async function postIce(){
   const date_label = formatDateLabel(game_date);
   const time_label = document.getElementById('newTime').value || 'TBD';
   const location = document.getElementById('newLoc').value;
-  const max_spots = Number(document.getElementById('newMax').value)||18;
+  const max_spots = Number(document.getElementById('newMax').value)||22;
   const formatKey = document.getElementById('newFormat').value;
   const fmt = GAME_FORMATS[formatKey] || GAME_FORMATS.default;
   const ref_status = document.getElementById('newRefStatus').value;
