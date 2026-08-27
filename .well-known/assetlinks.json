@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.oblhockey.app",
+        "sha256_cert_fingerprints": ["14:B2:20:0C:8D:73:18:F5:70:FA:5E:67:10:B4:2E:6B:63:9E:7E:4A:15:A6:A3:D7:55:DD:B6:5E:A8:1E:1C:A8"]
+      }
+    }]
