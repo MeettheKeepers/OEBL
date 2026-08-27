@@ -372,6 +372,15 @@ let listings = [];         // marketplace_listings rows for the active league
 let newListingType = 'sell'; // 'sell' | 'giveaway' — toggle state on the Sell/Swap post form
 let newListingFree = false;  // "mark as free" checkbox state on the Sell/Swap post form
 let newListingImageUrl = ''; // image uploaded so far for the in-progress Sell/Swap post
+let newListingTitle = '';    // title typed so far on the in-progress Sell/Swap post (survives re-render on image upload)
+let newListingDesc = '';     // description typed so far on the in-progress Sell/Swap post
+let newListingPriceStr = ''; // price typed so far (kept as string to preserve exact input)
+
+/* ---------- CHAT ---------- */
+let chatMessages = [];    // chat_messages rows for the active league, oldest first
+let chatPinnedId = null;  // leagues.pinned_message_id for the active league
+let chatPollTimer = null; // setInterval handle while the Chat tab is open
+let newChatBody = '';     // composer text (survives re-renders from polling)
 
 let roster = [];        // all profiles (for admin roster/lines)
 let iceTimes = [];      // ice_times rows — each one IS a "game" (lines are set per ice time)
@@ -619,6 +628,7 @@ function renderLeagueTabs(){
 }
 async function setLeague(code){
   if(code===activeLeague) return;
+  stopChatPolling();
   activeLeague = code;
   activeGameId = null;
   editingGameId = null;
@@ -627,7 +637,15 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules(), loadLeagueReviews()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules(), loadLeagueReviews(), loadChat()]);
+}
+async function loadChat(){
+  const [{ data: msgs }, { data: lg }] = await Promise.all([
+    sb.from('chat_messages').select('*').eq('league_id', activeLeague).order('created_at', { ascending:true }).limit(300),
+    sb.from('leagues').select('pinned_message_id').eq('id', activeLeague).maybeSingle(),
+  ]);
+  chatMessages = msgs || [];
+  chatPinnedId = lg ? lg.pinned_message_id : null;
 }
 async function loadLeagueReviews(){
   const { data } = await sb.from('league_reviews').select('*').eq('league_id', activeLeague).order('created_at', { ascending:false });
@@ -898,6 +916,7 @@ async function joinByInviteCode(){
 }
 
 async function signOut(){
+  stopChatPolling();
   await sb.auth.signOut();
   session = null; me = null;
   document.getElementById('app').style.display='none';
@@ -911,6 +930,7 @@ async function signOut(){
 const PLAYER_TABS = [
   {id:'dashboard', label:'Dashboard'},
   {id:'announcements', label:'Announcements'},
+  {id:'chat', label:'Chat'},
   {id:'profile', label:'Profile'},
   {id:'icetimes', label:'Ice Times'},
   {id:'lines', label:'Lines'},
@@ -925,6 +945,7 @@ const GOALIE_TABS = [
   {id:'goalieroster', label:'Goalie Roster'},
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
+  {id:'chat', label:'Chat'},
   {id:'sellswap', label:'Sell/Swap'},
   {id:'openice', label:'Open Ice'},
   {id:'rules', label:'Rules'},
@@ -934,6 +955,7 @@ const REFEREE_TABS = [
   {id:'refroster', label:'Referee Roster'},
   {id:'profile', label:'Profile'},
   {id:'announcements', label:'Announcements'},
+  {id:'chat', label:'Chat'},
   {id:'sellswap', label:'Sell/Swap'},
   {id:'openice', label:'Open Ice'},
   {id:'rules', label:'Rules'},
@@ -943,6 +965,7 @@ const REFEREE_TABS = [
 function adminTabs(){
   const tabs = [
     {id:'announcements', label:'Announcements'},
+    {id:'chat', label:'Chat'},
     {id:'postice', label:'Post Ice Time'},
     {id:'setlines', label:'Set Lines'},
     {id:'setstats', label:'Set Stats'},
@@ -979,6 +1002,7 @@ function setRole(r){
   if(r==='admin' && !me.is_commissioner) return;
   if(r==='referee' && !(me.positions||[]).includes('REF')) return;
   if(r==='goalie' && !(me.positions||[]).includes('G')) return;
+  stopChatPolling();
   editingGameId = null;
   role = r;
   document.getElementById('roleBtnPlayer').classList.toggle('active', r==='player');
@@ -1011,10 +1035,12 @@ function goTab(id){
   if(id!=='postice') editingGameId = null;
   renderTabs(tabsForRole(role));
   closeTabMenu();
+  if(id!=='chat') stopChatPolling();
   if(id==='pastgames'){ openPastGames(); return; }
   if(id==='openice'){ openOpenIce(); return; }
   if(id==='manageleagues'){ openManageLeagues(); return; }
   if(id==='developer'){ openDeveloperTab(); return; }
+  if(id==='chat'){ openChat(); return; }
   render();
 }
 
@@ -1099,6 +1125,7 @@ function render(){
   if(gated){ main.innerHTML = renderOnboardingGate(); return; }
   if(activeTab==='dashboard') main.innerHTML = renderDashboard();
   else if(activeTab==='announcements') main.innerHTML = renderAnnouncements();
+  else if(activeTab==='chat'){ main.innerHTML = renderChat(); scrollChatToBottom(); }
   else if(activeTab==='profile') main.innerHTML = renderProfile();
   else if(activeTab==='icetimes') main.innerHTML = renderIceTimes();
   else if(activeTab==='lines') main.innerHTML = renderLinesView();
@@ -2570,19 +2597,16 @@ function listingDaysLeft(l){
   return Math.max(0, Math.ceil(ms / 86400000));
 }
 async function postListing(){
-  const titleEl = document.getElementById('listingTitle');
-  const descEl = document.getElementById('listingDesc');
-  const priceEl = document.getElementById('listingPrice');
-  const title = titleEl.value.trim();
+  const title = (newListingTitle||'').trim();
   if(!title){ showToast('Enter a title'); return; }
   const listing_type = newListingType;
   let price_cents = null;
   if(listing_type==='sell'){
-    price_cents = newListingFree ? 0 : (Math.round(Number(priceEl.value)*100) || 0);
+    price_cents = newListingFree ? 0 : (Math.round(Number(newListingPriceStr)*100) || 0);
   }
   const payload = {
     user_id: me.id, league_id: activeLeague, title,
-    description: descEl.value.trim() || null,
+    description: (newListingDesc||'').trim() || null,
     listing_type, price_cents,
     image_url: newListingImageUrl || null,
   };
@@ -2590,6 +2614,7 @@ async function postListing(){
   if(error){ showToast('Failed: '+error.message); return; }
   showToast('Listing posted ✓');
   newListingType = 'sell'; newListingFree = false; newListingImageUrl = '';
+  newListingTitle = ''; newListingDesc = ''; newListingPriceStr = '';
   await loadListings();
   render();
 }
@@ -2602,11 +2627,9 @@ async function deleteListing(id, title){
   render();
 }
 async function markListingSold(id, location, title, listingOwnerId){
-  const msg = location==='on_app'
-    ? `Mark "${title}" as sold on the app? A 5% commission will be automatically deducted from the seller's bank roll.`
-    : `Mark "${title}" as sold off the app? No commission will be charged, but this is tracked for commissioner review.`;
+  const msg = `Mark "${title}" as sold? A 5% commission will be automatically deducted from the seller's bank roll.`;
   if(!confirm(msg)) return;
-  const { data, error } = await sb.rpc('mark_listing_sold', { p_listing_id: id, p_location: location });
+  const { data, error } = await sb.rpc('mark_listing_sold', { p_listing_id: id, p_location: 'on_app' });
   if(error){ showToast('Failed: '+error.message); return; }
   if(data && data.commission_cents){
     showToast(`Marked sold ✓ — $${(data.commission_cents/100).toFixed(2)} commission deducted from bank roll`);
@@ -2632,14 +2655,12 @@ function renderSellSwap(){
     const titleEsc = (l.title||'').replace(/'/g,"\\'");
     let statusHTML = '';
     if(l.status==='sold_on_app') statusHTML = `<div class="hint" style="margin-top:6px;color:var(--teal);">✓ Sold on the app — commission auto-deducted</div>`;
-    else if(l.status==='sold_off_app') statusHTML = `<div class="hint" style="margin-top:6px;">Marked sold off the app</div>`;
     let actionsHTML = '';
     if(canManage){
       if(l.status==='active'){
         if(commission){
           actionsHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
-            <button class="btn small" onclick="markListingSold('${l.id}','on_app','${titleEsc}','${l.user_id}')">Sold on App</button>
-            <button class="btn ghost small" onclick="markListingSold('${l.id}','off_app','${titleEsc}','${l.user_id}')">Sold off App</button>
+            <button class="btn small" onclick="markListingSold('${l.id}','on_app','${titleEsc}','${l.user_id}')">Mark Sold</button>
             <button class="btn ghost small" onclick="deleteListing('${l.id}','${titleEsc}')">Remove</button>
           </div>`;
         } else {
@@ -2674,10 +2695,10 @@ function renderSellSwap(){
     </div>
     <div class="grid cols-2">
       <div>
-        <div class="field"><label>Title</label><input id="listingTitle" placeholder="e.g. Bauer Vapor skates, size 9"></div>
-        <div class="field"><label>Description</label><textarea id="listingDesc" rows="3" placeholder="Condition, size, why you're selling, etc."></textarea></div>
+        <div class="field"><label>Title</label><input id="listingTitle" oninput="newListingTitle=this.value" value="${(newListingTitle||'').replace(/"/g,'&quot;')}" placeholder="e.g. Bauer Vapor skates, size 9"></div>
+        <div class="field"><label>Description</label><textarea id="listingDesc" oninput="newListingDesc=this.value" rows="3" placeholder="Condition, size, why you're selling, etc.">${(newListingDesc||'').replace(/</g,'&lt;')}</textarea></div>
         ${newListingType==='sell' ? `
-          <div class="field" style="max-width:200px;"><label>Price ($)</label><input id="listingPrice" type="number" min="0" step="0.01" value="0" ${newListingFree?'disabled':''}></div>
+          <div class="field" style="max-width:200px;"><label>Price ($)</label><input id="listingPrice" type="number" min="0" step="0.01" oninput="newListingPriceStr=this.value" value="${newListingPriceStr!==''?newListingPriceStr.replace(/"/g,'&quot;'):'0'}" ${newListingFree?'disabled':''}></div>
           <div style="margin-top:-8px;margin-bottom:10px;"><label class="hint"><input type="checkbox" ${newListingFree?'checked':''} onchange="toggleListingFree()" style="width:auto;margin-right:6px;">Mark as free</label></div>
           <div class="hint">If you set a price, once it sells you'll mark it Sold on the App or Sold off the App. Sold on the App automatically deducts a 5% commission from your bank roll — no e-transfer needed.</div>
         ` : `<div class="hint">Give Away listings are always free — no commission.</div>`}
@@ -2696,6 +2717,106 @@ function renderSellSwap(){
     ${others.map(cardHTML).join('') || (mine.length ? '' : '<div class="empty">No items posted yet.</div>')}
   </div>
   `;
+}
+
+/* ---------- CHAT ---------- */
+function chatAuthorName(userId){
+  if(userId===me.id) return me.name || 'You';
+  const p = playerById(userId);
+  return p ? p.name : 'Unknown';
+}
+function chatTime(ts){
+  return new Date(ts).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+}
+function renderChat(){
+  const pinned = chatPinnedId ? chatMessages.find(m=>m.id===chatPinnedId) : null;
+  const pinnedHTML = pinned ? `
+    <div class="panel" style="margin-bottom:14px;border:1px solid var(--teal);">
+      <div class="row-flex" style="margin-bottom:4px;">
+        <strong>📌 Pinned — ${chatAuthorName(pinned.user_id)}</strong>
+        ${me.is_commissioner ? `<button class="btn ghost small" onclick="unpinChatMessage()">Unpin</button>` : ''}
+      </div>
+      <div>${(pinned.body||'').replace(/</g,'&lt;')}</div>
+    </div>` : '';
+  const msgsHTML = chatMessages.length ? chatMessages.map(m=>{
+    const mine = m.user_id===me.id;
+    const canModerate = mine || me.is_commissioner;
+    const pinLink = me.is_commissioner
+      ? (chatPinnedId===m.id
+        ? `<a href="javascript:void(0)" class="hint" style="text-decoration:underline;margin-right:10px;" onclick="unpinChatMessage()">Unpin</a>`
+        : `<a href="javascript:void(0)" class="hint" style="text-decoration:underline;margin-right:10px;" onclick="pinChatMessage('${m.id}')">Pin</a>`)
+      : '';
+    return `<div style="margin-bottom:12px;">
+      <div class="row-flex" style="margin-bottom:2px;">
+        <strong style="font-size:13px;">${chatAuthorName(m.user_id)}</strong>
+        <span class="hint">${chatTime(m.created_at)}</span>
+      </div>
+      <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;display:inline-block;max-width:100%;">${(m.body||'').replace(/</g,'&lt;')}</div>
+      <div style="margin-top:2px;">
+        ${pinLink}
+        ${canModerate ? `<a href="javascript:void(0)" class="hint" style="text-decoration:underline;color:var(--danger);" onclick="deleteChatMessage('${m.id}')">Delete</a>` : ''}
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">No messages yet — say hi 👋</div>';
+  return `
+  <h2 class="section-title">Chat — ${activeLeague}</h2>
+  <p class="section-sub">Group chat for ${leagueName()}.${me.is_commissioner ? ' Pin a message to keep it at the top.' : ''}</p>
+  ${pinnedHTML}
+  <div id="chatScroll" style="max-height:420px;overflow-y:auto;padding:4px 4px 0;margin-bottom:12px;">${msgsHTML}</div>
+  <div class="panel" style="display:flex;gap:8px;align-items:flex-end;">
+    <div class="field" style="flex:1;margin:0;"><textarea id="chatBody" rows="2" placeholder="Message ${leagueName()}…" oninput="newChatBody=this.value" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}">${(newChatBody||'').replace(/</g,'&lt;')}</textarea></div>
+    <button class="btn purple small" onclick="sendChatMessage()">Send</button>
+  </div>`;
+}
+async function sendChatMessage(){
+  const body = (newChatBody||'').trim();
+  if(!body) return;
+  const { error } = await sb.from('chat_messages').insert({ league_id: activeLeague, user_id: me.id, body });
+  if(error){ showToast('Failed: '+error.message); return; }
+  newChatBody = '';
+  await loadChat();
+  render();
+}
+async function deleteChatMessage(id){
+  if(!confirm('Delete this message?')) return;
+  const { error } = await sb.from('chat_messages').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  await loadChat();
+  render();
+}
+async function pinChatMessage(id){
+  const { error } = await sb.rpc('pin_chat_message', { p_league_id: activeLeague, p_message_id: id });
+  if(error){ showToast('Failed: '+error.message.replace(/^.*?:\s*/,'')); return; }
+  showToast('Pinned ✓');
+  await loadChat();
+  render();
+}
+async function unpinChatMessage(){
+  const { error } = await sb.rpc('unpin_chat_message', { p_league_id: activeLeague });
+  if(error){ showToast('Failed: '+error.message.replace(/^.*?:\s*/,'')); return; }
+  await loadChat();
+  render();
+}
+async function openChat(){
+  await loadChat();
+  render();
+  startChatPolling();
+}
+function startChatPolling(){
+  stopChatPolling();
+  chatPollTimer = setInterval(async()=>{
+    if(activeTab!=='chat') return;
+    const active = document.activeElement;
+    if(active && active.id==='chatBody') return; // don't interrupt someone mid-typing
+    await loadChat();
+    render();
+  }, 4000);
+}
+function stopChatPolling(){
+  if(chatPollTimer){ clearInterval(chatPollTimer); chatPollTimer = null; }
+}
+function scrollChatToBottom(){
+  setTimeout(()=>{ const el = document.getElementById('chatScroll'); if(el) el.scrollTop = el.scrollHeight; }, 0);
 }
 
 /* ---------- ADMIN: POST ICE TIME ---------- */
@@ -3133,8 +3254,6 @@ function sortedRoster(list){
     arr.sort((a,b)=> (a.gender||'').localeCompare(b.gender||'') || a.name.localeCompare(b.name));
   } else if(rosterSort==='league'){
     arr.sort((a,b)=> ((a.leagues||[])[0]||'').localeCompare((b.leagues||[])[0]||'') || a.name.localeCompare(b.name));
-  } else if(rosterSort==='offappsales'){
-    arr.sort((a,b)=> (b.off_app_sale_count||0)-(a.off_app_sale_count||0));
   } else arr.sort((a,b)=> a.name.localeCompare(b.name));
   return arr;
 }
@@ -3188,14 +3307,13 @@ function renderRoster(){
         <option value="age" ${rosterSort==='age'?'selected':''}>Sort: Age</option>
         <option value="gender" ${rosterSort==='gender'?'selected':''}>Sort: Gender</option>
         <option value="league" ${rosterSort==='league'?'selected':''}>Sort: League</option>
-        <option value="offappsales" ${rosterSort==='offappsales'?'selected':''}>Sort: Off-App Sales</option>
       </select>
     </div>
   </div>
   <div class="panel">
   <div class="table-scroll">
   <table>
-    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Off-App Sales</th><th>Rules Ack.</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Rules Ack.</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
       const inj = INJURY[p.injury_status||'green'];
       const age = calcAge(p.birthdate);
@@ -3208,7 +3326,6 @@ function renderRoster(){
           ${SKILL_LEVELS.map(([code,label])=>`<option value="${code}" ${p.skill_level===code?'selected':''}>${label}</option>`).join('')}
         </select></td>
         <td><input type="number" step="0.01" style="width:80px;" value="${(p.bankroll_cents/100).toFixed(2)}" onchange="updatePlayerBankroll('${p.id}',this.value)"></td>
-        <td>${p.off_app_sale_count ? `<span class="tag" style="background:var(--danger);color:#fff;" title="Claimed 'sold off the app' this many times">${p.off_app_sale_count}</span>` : '0'}</td>
         <td>${p.rules_acknowledged_at ? `<span class="tag" style="background:rgba(0,0,0,.06);color:var(--good);" title="Acknowledged ${new Date(p.rules_acknowledged_at).toLocaleString('en-US',{ month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}">${new Date(p.rules_acknowledged_at).toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric' })}</span>` : `<span class="tag" style="background:var(--danger);color:#fff;">Not yet</span>`}</td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
