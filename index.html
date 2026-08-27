@@ -1891,9 +1891,9 @@ async function saveGoalieProfile(){
 function positionBreakdown(it){
   const forGame = signups.filter(x=>x.ice_time_id===it.id);
   const cap = (group)=>{
-    if(group==='forward') return (it.fwd_lines||0)*3;
-    if(group==='defense') return (it.def_pairs||0)*2;
-    return it.goalies||0;
+    if(group==='forward') return (it.fwd_lines||0)*6;
+    if(group==='defense') return (it.def_pairs||0)*4;
+    return (it.goalies||0)*2;
   };
   const filled = (group)=> forGame.filter(x=>x.position_group===group).length;
   return {
@@ -1901,6 +1901,25 @@ function positionBreakdown(it){
     defense: { filled: filled('defense'), cap: cap('defense') },
     goalie: { filled: filled('goalie'), cap: cap('goalie') },
   };
+}
+const ICE_TIME_STATUS = {
+  needs:   { label:'Needs Players', color:'#e05a5a' },
+  almost:  { label:'Almost Full',   color:'#e0b23a' },
+  booked:  { label:'Booked ✓',      color:'#4fd18a' },
+};
+function iceTimeStatus(it, filledCount){
+  if(it.booked) return ICE_TIME_STATUS.booked;
+  if(filledCount>=16) return ICE_TIME_STATUS.almost;
+  return ICE_TIME_STATUS.needs;
+}
+async function markIceTimeBooked(id, dateLabel){
+  const ok = confirm(`Mark "${dateLabel}" as booked? This will charge every signed-up player's bank roll for their spot and lock the roster.`);
+  if(!ok) return;
+  const { data, error } = await sb.rpc('mark_ice_time_booked', { p_ice_time_id: id });
+  if(error){ showToast('Failed: '+error.message.replace(/^.*?:\s*/,'')); return; }
+  showToast(`Booked ✓ — charged ${data.charged_count} player(s)`);
+  await loadIceTimes();
+  render();
 }
 function freeAgentListFor(iceTimeId){ return freeAgentList.filter(w=>w.ice_time_id===iceTimeId); }
 function renderIceTimes(){
@@ -1917,8 +1936,11 @@ function renderIceTimes(){
     const isFull = claimedFor.length >= s.max_spots;
     const fal = freeAgentListFor(s.id);
     const onFal = fal.some(w=>w.user_id===me.id);
+    const status = iceTimeStatus(s, claimedFor.length);
     let actionHTML;
-    if(inIt){
+    if(s.booked){
+      actionHTML = inIt ? `<span class="hint">You're in — booked</span>` : `<span class="hint">Booked — no longer open</span>`;
+    } else if(inIt){
       actionHTML = `<button class="btn danger small" onclick="toggleIce('${s.id}')">Leave</button>`;
     } else if(isFull){
       actionHTML = onFal
@@ -1929,7 +1951,7 @@ function renderIceTimes(){
     }
     return `<div class="ice-card">
       <div>
-        <div class="ice-date">${s.date_label} · ${s.time_label}</div>
+        <div class="ice-date">${s.date_label} · ${s.time_label} <span class="tag" style="background:${status.color};color:#04241a;">${status.label}</span></div>
         <div class="ice-loc">📍 ${s.location}</div>
         <div class="spots-bar"><div class="spots-fill" style="width:${pct}%"></div></div>
         <div class="hint">${claimedFor.length}/${s.max_spots} spots filled${isFull && fal.length ? ` · ${fal.length} on Free Agent List${onFal?' (you included)':''}` : ''}</div>
@@ -2871,9 +2893,11 @@ function renderPostIce(){
         const goalieName = s.goalie_id ? (playerById(s.goalie_id)?.name||'Assigned') : 'Unassigned';
         const gs = GOALIE_STATUS[s.goalie_status||'none'];
         const skillLabel = skillLevelRangeLabel(s.min_skill_level, s.max_skill_level);
+        const status = iceTimeStatus(s, n);
         return `<div class="panel" style="margin-bottom:10px;padding:14px 16px;">
         <div class="row-flex" style="margin-bottom:8px;flex-wrap:wrap;">
           <strong style="font-size:13px;">${s.date_label} — ${s.location}</strong>
+          <span class="tag" style="background:${status.color};color:#04241a;">${status.label}</span>
           <span class="hint">${n}/${s.max_spots} spots filled</span>
         </div>
         <div class="hint" style="margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
@@ -2895,12 +2919,13 @@ function renderPostIce(){
         </div>
         ${(()=>{ const signedUp = signups.filter(x=>x.ice_time_id===s.id); const fal = freeAgentListFor(s.id);
           return `<div class="hint" style="margin-bottom:10px;">
-            ${signedUp.length ? signedUp.map(x=>{ const p = playerById(x.user_id); return `<span class="tag" style="margin:2px;">${p?p.name:'?'}${x.position_group?' ('+x.position_group+')':''} <span style="cursor:pointer;color:var(--danger);font-weight:900;" onclick="removePlayerFromGame('${s.id}','${x.user_id}','${(p?p.name:'this player').replace(/'/g,"\\'")}')">×</span></span>`; }).join('') : '<span>No signups yet.</span>'}
+            ${signedUp.length ? signedUp.map(x=>{ const p = playerById(x.user_id); return `<span class="tag" style="margin:2px;">${p?p.name:'?'}${x.position_group?' ('+x.position_group+')':''} <span style="cursor:pointer;color:var(--danger);font-weight:900;" onclick="removePlayerFromGame('${s.id}','${x.user_id}','${(p?p.name:'this player').replace(/'/g,"\\'")}',${!!s.booked})">×</span></span>`; }).join('') : '<span>No signups yet.</span>'}
             ${fal.length ? `<div style="margin-top:6px;">Free Agent List: ${fal.map(w=>{ const p = playerById(w.user_id); return p?p.name:'?'; }).join(', ')}</div>` : ''}
           </div>`; })()}
-        <div style="display:flex;gap:6px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn ghost small" onclick="editIceTime('${s.id}')">Edit</button>
           <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
+          ${!s.booked ? `<button class="btn purple small" onclick="markIceTimeBooked('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Mark as Booked</button>` : ''}
         </div>
       </div>`; }).join('') || '<div class="hint">None yet.</div>'}
     </div>
@@ -2975,8 +3000,9 @@ async function deleteIceTime(id, label){
   await loadIceTimes();
   render();
 }
-async function removePlayerFromGame(iceTimeId, userId, playerName){
-  if(!confirm(`Remove ${playerName} from this game? Their spot refunds and the next Free Agent gets picked up automatically.`)) return;
+async function removePlayerFromGame(iceTimeId, userId, playerName, isBooked){
+  const refundNote = isBooked ? ' Their charge for this session refunds automatically.' : '';
+  if(!confirm(`Remove ${playerName} from this game?${refundNote} The next Free Agent gets picked up automatically.`)) return;
   const { data, error } = await sb.rpc('remove_player_from_ice_time', { p_ice_time_id: iceTimeId, p_user_id: userId });
   if(error){ showToast('Failed: '+error.message); return; }
   showToast(`${playerName} removed ✓`);
