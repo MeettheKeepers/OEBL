@@ -2950,7 +2950,8 @@ function renderSellSwap(){
   const others = listings.filter(l=>l.user_id!==me.id && l.status==='active');
   const cardHTML = (l)=>{
     const poster = playerById(l.user_id);
-    const canManage = l.user_id===me.id || me.is_commissioner;
+    const isOwner = l.user_id===me.id;
+    const canManage = isOwner || me.is_commissioner;
     const priceLabel = l.listing_type==='giveaway' ? 'Free — Give Away' : (l.price_cents ? '$'+(l.price_cents/100).toFixed(2) : 'Free');
     const commission = (l.listing_type==='sell' && l.price_cents) ? (l.price_cents*0.05/100).toFixed(2) : null;
     const titleEsc = (l.title||'').replace(/'/g,"\\'");
@@ -2959,7 +2960,7 @@ function renderSellSwap(){
     let actionsHTML = '';
     if(canManage){
       if(l.status==='active'){
-        if(commission){
+        if(commission && isOwner){
           actionsHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
             <button class="btn purple small" onclick="markListingSold('${l.id}','on_app','${titleEsc}','${l.user_id}')">Mark Sold</button>
             <button class="btn ghost small" onclick="deleteListing('${l.id}','${titleEsc}')">Remove</button>
