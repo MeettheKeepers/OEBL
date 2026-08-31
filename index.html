@@ -550,7 +550,7 @@ async function enterApp(sess){
   await loadLeagueData();
   await initPush();
   startChatWatch();
-  setRole('player');
+  setRole(me.is_commissioner ? 'admin' : 'player');
 }
 
 /* ================= PUSH NOTIFICATIONS ================= */
@@ -1050,6 +1050,7 @@ const REFEREE_TABS = [
 // and Manage Leagues only shows for true global commissioners (not scoped/independent ones).
 function adminTabs(){
   const tabs = [
+    {id:'admindash', label:'Dashboard'},
     {id:'announcements', label:'Announcements'},
     {id:'postice', label:'Post Ice Time'},
     {id:'setstats', label:'Set Stats'},
@@ -1063,7 +1064,7 @@ function adminTabs(){
     {id:'openice', label:'Open Ice'},
     {id:'rules', label:'Rules'},
   ];
-  if(hasProAccess()) tabs.splice(5, 0, {id:'directory', label:'Player Directory'});
+  if(hasProAccess()) tabs.splice(6, 0, {id:'directory', label:'Player Directory'});
   if(isGlobalCommish()) tabs.push({id:'manageleagues', label:'Manage Leagues'});
   return tabs;
 }
@@ -1216,6 +1217,7 @@ function render(){
   else if(!gated) updateRoleToggleVisibility();
   if(gated){ main.innerHTML = renderOnboardingGate(); return; }
   if(activeTab==='dashboard') main.innerHTML = renderDashboard();
+  else if(activeTab==='admindash') main.innerHTML = renderAdminDashboard();
   else if(activeTab==='announcements') main.innerHTML = renderAnnouncements();
   else if(activeTab==='chat'){
     const scrollId = (chatSection==='listings' && dmThread) ? 'dmScroll' : 'chatScroll';
@@ -1542,6 +1544,46 @@ function renderDashboard(){
       }).join('') : '<div class="empty">No games in the next 7 days.</div>'}
     </div>
   </div>`;
+}
+function renderAdminDashboard(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const upcoming = iceTimes
+    .filter(it=>{
+      if(!it.game_date) return true; // no date set yet — still surface it so it gets fixed
+      const d = new Date(it.game_date+'T00:00:00');
+      return d >= today;
+    })
+    .sort((a,b)=> (a.game_date||'').localeCompare(b.game_date||''));
+  const activePlayers = activeRoster().length;
+
+  return `
+  <h2 class="section-title">Dashboard — ${activeLeague}</h2>
+  <p class="section-sub">Commissioner snapshot for ${leagueName()}. Click any game to manage it.</p>
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="hint">${upcoming.length} upcoming game${upcoming.length===1?'':'s'} · ${activePlayers} active player${activePlayers===1?'':'s'} in ${leagueName()}</div>
+  </div>
+  <h3 style="font-size:15px;color:var(--teal);margin-bottom:8px;">Upcoming Games</h3>
+  ${upcoming.length ? `<div style="display:flex;gap:14px;overflow-x:auto;padding-bottom:10px;">
+    ${upcoming.map(it=>{
+      const n = signups.filter(x=>x.ice_time_id===it.id).length;
+      const status = iceTimeStatus(it, n);
+      return `<div class="panel" style="min-width:230px;max-width:230px;flex:0 0 auto;cursor:pointer;" onclick="openGameFromDashboard('${it.id}')">
+        <div class="ice-date">${it.date_label||'Date TBD'}${it.time_label?' · '+it.time_label:''}</div>
+        <div class="ice-loc">📍 ${it.location}</div>
+        <div style="margin-top:8px;"><span class="tag" style="background:${status.color};color:#04241a;">${status.label}</span></div>
+        <div class="hint" style="margin-top:8px;">${n}/${it.max_spots} spots filled</div>
+        <div class="hint">${it.referee_id ? 'Ref: '+(playerById(it.referee_id)?.name||'Assigned') : 'Ref: not assigned'}</div>
+        <div class="hint">${it.goalie_id ? 'Goalie: '+(playerById(it.goalie_id)?.name||'Assigned') : 'Goalie: not assigned'}</div>
+      </div>`;
+    }).join('')}
+  </div>` : '<div class="empty">No upcoming games posted yet — head to Post Ice Time to add one.</div>'}
+  `;
+}
+function openGameFromDashboard(id){
+  activeTab = 'postice';
+  renderTabs(tabsForRole(role));
+  closeTabMenu();
+  editIceTime(id);
 }
 
 /* ---------- PROFILE ---------- */
