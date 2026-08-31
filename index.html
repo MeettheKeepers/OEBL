@@ -408,6 +408,7 @@ let signups = [];       // ice_time_signups rows
 let activeGameId = null; // id of the ice_time currently selected for lines
 let activeTeam = 'A';
 let lines = [];         // game_lines rows for activeGameId (both teams)
+let myLines = {};       // game_id -> {team, slot_key} for my own assignment, across all loaded iceTimes
 let merch = [];
 let allStats = [];      // game_stats rows (all games, filtered client-side to activeLeague's ice times)
 let activeStatsGameId = null; // id of the ice_time currently selected in Set Stats
@@ -1021,7 +1022,6 @@ const PLAYER_TABS = [
   {id:'announcements', label:'Announcements'},
   {id:'profile', label:'Profile'},
   {id:'icetimes', label:'Ice Times'},
-  {id:'lines', label:'Lines'},
   {id:'stats', label:'Stats'},
   {id:'merch', label:'Merch'},
   {id:'sellswap', label:'Sell/Swap'},
@@ -1052,7 +1052,6 @@ function adminTabs(){
   const tabs = [
     {id:'announcements', label:'Announcements'},
     {id:'postice', label:'Post Ice Time'},
-    {id:'setlines', label:'Set Lines'},
     {id:'setstats', label:'Set Stats'},
     {id:'roster', label:'Roster'},
     {id:'message', label:'Player Finder'},
@@ -1064,7 +1063,7 @@ function adminTabs(){
     {id:'openice', label:'Open Ice'},
     {id:'rules', label:'Rules'},
   ];
-  if(hasProAccess()) tabs.splice(6, 0, {id:'directory', label:'Player Directory'});
+  if(hasProAccess()) tabs.splice(5, 0, {id:'directory', label:'Player Directory'});
   if(isGlobalCommish()) tabs.push({id:'manageleagues', label:'Manage Leagues'});
   return tabs;
 }
@@ -1156,6 +1155,14 @@ async function loadIceTimes(){
   else lines = [];
   if(activeStatsGameId && !iceTimes.find(g=>g.id===activeStatsGameId)) activeStatsGameId = null;
   if(iceTimes.length && !activeStatsGameId) activeStatsGameId = iceTimes[0].id;
+  await loadMyLineAssignments();
+}
+async function loadMyLineAssignments(){
+  const ids = iceTimes.map(it=>it.id);
+  if(!ids.length){ myLines = {}; return; }
+  const { data } = await sb.from('game_lines').select('game_id,team,slot_key').eq('player_id', me.id).in('game_id', ids);
+  myLines = {};
+  (data||[]).forEach(r=>{ myLines[r.game_id] = { team:r.team, slot_key:r.slot_key }; });
 }
 async function loadMerch(){
   const { data } = await sb.from('merch_items').select('*').eq('active', true).eq('league_id', activeLeague).order('name');
@@ -1219,11 +1226,10 @@ function render(){
   }
   else if(activeTab==='profile') main.innerHTML = renderProfile();
   else if(activeTab==='icetimes') main.innerHTML = renderIceTimes();
-  else if(activeTab==='lines') main.innerHTML = renderLinesView();
+  else if(activeTab==='gamelines') main.innerHTML = renderGameLines();
   else if(activeTab==='stats') main.innerHTML = renderStats();
   else if(activeTab==='merch') main.innerHTML = renderMerch();
   else if(activeTab==='postice') main.innerHTML = renderPostIce();
-  else if(activeTab==='setlines') main.innerHTML = renderSetLines();
   else if(activeTab==='setstats') main.innerHTML = renderSetStats();
   else if(activeTab==='roster') main.innerHTML = renderRoster();
   else if(activeTab==='message') main.innerHTML = renderMessagePlayers();
@@ -1525,11 +1531,15 @@ function renderDashboard(){
     </div>
     <div class="panel">
       <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Next 7 Days</h3>
-      ${upcoming.length ? upcoming.map(it=>`
-        <div style="padding:10px 0;border-bottom:1px solid var(--line);">
+      ${upcoming.length ? upcoming.map(it=>{
+        const myAssign = myLineAssignmentText(it.id, it);
+        return `
+        <div style="padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer;" onclick="openGameLines('${it.id}','dashboard')">
           <div class="ice-date">${iceTimeLabel(it)}</div>
           <div class="ice-loc">${it.time_label}</div>
-        </div>`).join('') : '<div class="empty">No games in the next 7 days.</div>'}
+          ${myAssign ? `<div class="hint" style="color:var(--teal);font-weight:600;margin-top:2px;">You: ${myAssign}</div>` : `<div class="hint" style="text-decoration:underline;margin-top:2px;">View Lines</div>`}
+        </div>`;
+      }).join('') : '<div class="empty">No games in the next 7 days.</div>'}
     </div>
   </div>`;
 }
@@ -2095,6 +2105,7 @@ function renderIceTimes(){
     } else {
       actionHTML = `<button class="btn purple small" onclick="toggleIce('${s.id}')">Claim Spot</button>`;
     }
+    const myAssign = myLineAssignmentText(s.id, s);
     return `<div class="ice-card">
       <div>
         <div class="ice-date">${s.date_label} · ${s.time_label} <span class="tag" style="background:${status.color};color:#04241a;">${status.label}</span></div>
@@ -2104,6 +2115,8 @@ function renderIceTimes(){
         <div class="hint">${bd.forward.filled}/${bd.forward.cap} forwards · ${bd.defense.filled}/${bd.defense.cap} defense · ${bd.goalie.filled}/${bd.goalie.cap} goalies filled</div>
         <div class="hint">${s.cost_cents!=null ? `Cost: $${(s.cost_cents/100).toFixed(2)}` : 'Free session'}${skillLabel?' · '+skillLabel:''}</div>
         <div class="hint">${s.referee_id ? 'Referee: '+(playerById(s.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
+        ${myAssign ? `<div class="hint" style="color:var(--teal);font-weight:600;">You: ${myAssign}</div>` : ''}
+        <a href="javascript:void(0)" class="hint" style="text-decoration:underline;" onclick="openGameLines('${s.id}','icetimes')">View Lines</a>
       </div>
       ${actionHTML}
     </div>`;
@@ -2420,23 +2433,52 @@ function buildSlotDefs(game){
   defs.push({ grp:'Goalies', slots:goalieSlots });
   return defs;
 }
-function renderLinesView(){ return linesScreen(false); }
-function renderSetLines(){ return linesScreen(true); }
 function iceTimeLabel(it){ return `${it.date_label} — ${it.location}`; }
 
-function linesScreen(editable){
-  const title = (editable ? 'Set Lines' : 'Game Lines') + ' — ' + activeLeague;
-  const sub = editable ? `Assign roster players to each slot, for both teams, for the selected ${activeLeague} ice time.` : `Lines set by the commissioner for the selected ${activeLeague} ice time — both teams.`;
+/* Lines are reached by drilling into one specific game (Dashboard, Ice Times, or the
+   commissioner's Post Ice Time list) rather than via a standalone nav tab. */
+let linesBackTab = 'icetimes'; // which real tab the "← Back" button on the lines page returns to
+async function openGameLines(gameId, backTab){
+  activeGameId = gameId;
+  linesBackTab = backTab || (role==='admin' ? 'postice' : 'icetimes');
+  await loadLines(gameId);
+  activeTab = 'gamelines';
+  renderTabs(tabsForRole(role));
+  closeTabMenu();
+  render();
+}
+const POS_FULL = { LW:'Left Wing', C:'Center', RW:'Right Wing', LD:'Left Defense', RD:'Right Defense', G:'Goalie' };
+function describeSlot(slotKey){
+  let m = slotKey.match(/^L(\d+)_(\w+)$/);
+  if(m) return `Line ${m[1]} — ${POS_FULL[m[2]]||m[2]}`;
+  m = slotKey.match(/^D(\d+)_(\w+)$/);
+  if(m) return `Pair ${m[1]} — ${POS_FULL[m[2]]||m[2]}`;
+  m = slotKey.match(/^G(\d*)$/);
+  if(m) return m[1] ? `Goalie ${m[1]}` : 'Goalie';
+  return slotKey;
+}
+function myLineAssignmentText(gameId, game){
+  const a = myLines[gameId];
+  if(!a) return null;
+  const teamName = a.team==='A' ? (game.team_a_name||'Team Light') : (game.team_b_name||'Team Dark');
+  return `${describeSlot(a.slot_key)} — ${teamName}`;
+}
+
+function renderGameLines(){
+  const editable = role==='admin' && me.is_commissioner;
+  const title = 'Game Lines — ' + activeLeague;
+  const sub = editable ? `Assign players to each slot, for both teams, for this ${activeLeague} ice time.` : `Lines set by the commissioner for this ${activeLeague} ice time — both teams.`;
+  const backBtn = `<button class="btn ghost small" style="margin-bottom:14px;" onclick="goTab('${linesBackTab}')">← Back</button>`;
   if(!iceTimes.length){
-    return `<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
+    return `${backBtn}<h2 class="section-title">${title}</h2><p class="section-sub">${sub}</p>
     <div class="empty">No ice times posted yet.${editable ? ' Post one from the "Post Ice Time" tab — it shows up here automatically.' : ''}</div>`;
   }
   const game = iceTimes.find(g=>g.id===activeGameId) || iceTimes[0];
   const opts = iceTimes.map(g=>`<option value="${g.id}" ${g.id===activeGameId?'selected':''}>${iceTimeLabel(g)}</option>`).join('');
-  const gameLabelEsc = iceTimeLabel(game).replace(/'/g,"\\'");
   const skaterCap = (game.fwd_lines||2)*3 + (game.def_pairs||2)*2;
   const goalieCap = game.goalies||1;
   const defs = buildSlotDefs(game);
+  const myAssignment = myLineAssignmentText(game.id, game);
 
   const teamColumn = (teamKey, teamLabel, teamNameField)=>{
     const teamLines = lines.filter(l=>l.team===teamKey);
@@ -2446,13 +2488,14 @@ function linesScreen(editable){
     const slotHTML = (slotKey,label)=>{
       const pid = lineup(slotKey);
       const p = pid ? playerById(pid) : null;
+      const mine = pid===me.id;
       if(editable){
         const options = activeRoster().map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
         return `<div class="slot"><div class="pos-lbl">${label}</div>
           <select onchange="setLineSlot('${teamKey}','${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
       }
       const canRate = p && p.id!==me.id;
-      return `<div class="slot"><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}</div>${p&&p.skill_level?`<span class="tag rank" title="${skillLevelLabel(p.skill_level)}">${skillLevelLabel(p.skill_level)[0]}</span>`:''}${canRate?`<a href="javascript:void(0)" class="hint" style="text-decoration:underline;margin-left:6px;" onclick="openRatePlayer('${p.id}','${game.id}')">Rate</a>`:''}</div>`;
+      return `<div class="slot" ${mine?'style="border:1px solid var(--teal);"':''}><div class="pos-lbl">${label}</div><div class="name">${p?p.name:'—'}${mine?' (you)':''}</div>${p&&p.skill_level?`<span class="tag rank" title="${skillLevelLabel(p.skill_level)}">${skillLevelLabel(p.skill_level)[0]}</span>`:''}${canRate?`<a href="javascript:void(0)" class="hint" style="text-decoration:underline;margin-left:6px;" onclick="openRatePlayer('${p.id}','${game.id}')">Rate</a>`:''}</div>`;
     };
     const body = defs.map(section=>`
       ${section.grp ? `<h3 style="font-size:15px;color:var(--teal)">${section.grp}</h3>` : ''}
@@ -2470,17 +2513,104 @@ function linesScreen(editable){
   };
 
   return `
+  ${backBtn}
   <h2 class="section-title">${title}</h2>
   <p class="section-sub">${sub}</p>
-  <div class="row-flex" style="max-width:480px;align-items:flex-end;gap:10px;">
+  ${myAssignment ? `<div class="panel" style="margin-bottom:14px;border:1px solid var(--teal);"><strong>You're playing:</strong> ${myAssignment}</div>` : ''}
+  <div class="row-flex" style="max-width:${editable?'680px':'480px'};align-items:flex-end;gap:10px;flex-wrap:wrap;">
     <div class="field" style="max-width:320px;flex:1;"><select onchange="activeGameId=this.value;loadLines(this.value).then(render)">${opts}</select></div>
-    ${editable ? `<button class="btn ghost small" onclick="deleteIceTime('${game.id}','${gameLabelEsc}')">Delete</button>` : ''}
+    ${editable ? `<button class="btn purple small" onclick="autoFillLines()">Auto-Fill Lines</button>` : ''}
+    ${editable ? `<button class="btn ghost small" onclick="clearLines()">Clear All</button>` : ''}
   </div>
+  ${editable ? `<p class="hint" style="margin-bottom:12px;">Auto-Fill balances both teams by skill level and each player's preferred position, using who's signed up for this game. You can still adjust any slot by hand afterward.</p>` : ''}
   <div class="hint" style="margin-bottom:12px;">${game.referee_id ? 'Referee: '+(playerById(game.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
   <div class="grid cols-2" style="align-items:start;">
     ${teamColumn('A', game.team_a_name || 'Team Light', 'team_a_name')}
     ${teamColumn('B', game.team_b_name || 'Team Dark', 'team_b_name')}
   </div>`;
+}
+async function clearLines(){
+  if(!confirm('Clear all lines for this game? This cannot be undone.')) return;
+  await sb.from('game_lines').delete().eq('game_id', activeGameId);
+  await loadLines(activeGameId);
+  render();
+  showToast('Lines cleared');
+}
+async function autoFillLines(){
+  const game = iceTimes.find(g=>g.id===activeGameId);
+  if(!game) return;
+  if(!confirm('Auto-fill lines from signed-up players, balanced by skill and position? This overwrites any lines already set for this game.')) return;
+
+  const skillNum = (p)=> (p && skillLevelOrder(p.skill_level)) || 2; // unset skill treated as mid-tier
+  const pool = (group)=> signups.filter(x=>x.ice_time_id===activeGameId && x.position_group===group)
+    .map(x=>playerById(x.user_id))
+    .filter(Boolean)
+    .sort((a,b)=> skillNum(b)-skillNum(a));
+
+  // Greedily split a skill-sorted pool into two teams, always adding the next player
+  // to whichever team currently has the lower running skill total — keeps both sides even.
+  function splitBalanced(list){
+    let totalA=0, totalB=0;
+    const a=[], b=[];
+    list.forEach(p=>{
+      if(totalA<=totalB){ a.push(p); totalA+=skillNum(p); }
+      else { b.push(p); totalB+=skillNum(p); }
+    });
+    return { a, b };
+  }
+  // Fill slot keys, preferring each player's own preferred position where possible.
+  function assignToSlots(players, slotDefs){
+    const remaining = [...players];
+    const assignment = {};
+    slotDefs.forEach(([slotKey,posLabel])=>{
+      const idx = remaining.findIndex(p=>(p.positions||[]).includes(posLabel));
+      if(idx>-1) assignment[slotKey] = remaining.splice(idx,1)[0];
+    });
+    slotDefs.forEach(([slotKey])=>{
+      if(!assignment[slotKey] && remaining.length) assignment[slotKey] = remaining.shift();
+    });
+    return assignment;
+  }
+  function assignGoalies(players, slotKeys){
+    const assignment = {};
+    slotKeys.forEach((key,i)=>{ if(players[i]) assignment[key] = players[i]; });
+    return assignment;
+  }
+
+  const linesN = game.fwd_lines||2, pairsN = game.def_pairs||2, goaliesN = game.goalies||1;
+  const fwdSlotKeys = [];
+  for(let i=1;i<=linesN;i++) fwdSlotKeys.push([`L${i}_LW`,'LW'],[`L${i}_C`,'C'],[`L${i}_RW`,'RW']);
+  const defSlotKeys = [];
+  for(let i=1;i<=pairsN;i++) defSlotKeys.push([`D${i}_LD`,'LD'],[`D${i}_RD`,'RD']);
+  const goalieSlotKeys = [];
+  for(let i=1;i<=goaliesN;i++) goalieSlotKeys.push(`G${i}`);
+
+  const fwdSplit = splitBalanced(pool('forward'));
+  const defSplit = splitBalanced(pool('defense'));
+  const goalieSplit = splitBalanced(pool('goalie'));
+
+  const rows = [];
+  const pushRows = (assignment, team)=>{
+    Object.entries(assignment).forEach(([slotKey, p])=>{
+      rows.push({ game_id: activeGameId, team, slot_key: slotKey, player_id: p.id });
+    });
+  };
+  pushRows(assignToSlots(fwdSplit.a, fwdSlotKeys), 'A');
+  pushRows(assignToSlots(fwdSplit.b, fwdSlotKeys), 'B');
+  pushRows(assignToSlots(defSplit.a, defSlotKeys), 'A');
+  pushRows(assignToSlots(defSplit.b, defSlotKeys), 'B');
+  pushRows(assignGoalies(goalieSplit.a, goalieSlotKeys), 'A');
+  pushRows(assignGoalies(goalieSplit.b, goalieSlotKeys), 'B');
+
+  await sb.from('game_lines').delete().eq('game_id', activeGameId);
+  if(rows.length){
+    const { error } = await sb.from('game_lines').insert(rows);
+    if(error){ showToast('Failed: '+error.message); return; }
+  }
+  await loadLines(activeGameId);
+  await loadMyLineAssignments();
+  render();
+  showToast(rows.length ? 'Lines auto-filled ✓ — adjust any slot by hand if needed.' : 'No signed-up players to fill lines with yet.');
 }
 async function setLineSlot(team, slotKey, val){
   if(val){
@@ -3298,6 +3428,7 @@ function renderPostIce(){
           </div>`; })()}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn ghost small" onclick="editIceTime('${s.id}')">Edit</button>
+          <button class="btn ghost small" onclick="openGameLines('${s.id}','postice')">Lines</button>
           <button class="btn ghost small" onclick="deleteIceTime('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Delete</button>
           ${!s.booked ? `<button class="btn purple small" onclick="markIceTimeBooked('${s.id}','${s.date_label.replace(/'/g,"\\'")}')">Mark as Booked</button>` : ''}
         </div>
