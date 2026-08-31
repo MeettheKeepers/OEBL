@@ -2766,11 +2766,22 @@ function renderStats(){
 }
 
 /* ---------- MERCH ---------- */
+// Takes a File straight from an <input type=file>, reads its bytes into memory right away,
+// and uploads that in-memory copy instead of the live File reference. On some mobile browsers
+// (notably Android WebView) the picked file's underlying data can become unreadable by the time
+// an async upload call actually gets around to serializing it, which surfaces as a Supabase
+// Storage "No content provided" error even though the picker showed a valid file. Reading the
+// bytes immediately, before any other work, avoids that race.
 async function uploadListingImage(file){
   if(!file) return null;
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
   const path = `${me.id}/${Date.now()}.${ext}`;
-  const { error } = await sb.storage.from('listing-images').upload(path, file, { upsert: true });
+  let payload = file;
+  try{
+    const buf = await file.arrayBuffer();
+    if(buf && buf.byteLength) payload = new Blob([buf], { type: file.type || 'application/octet-stream' });
+  }catch(e){ /* fall back to the raw File if this browser can't read it this way */ }
+  const { error } = await sb.storage.from('listing-images').upload(path, payload, { upsert: true, contentType: file.type || undefined });
   if(error){ showToast('Image upload failed: '+error.message); return null; }
   const { data } = sb.storage.from('listing-images').getPublicUrl(path);
   return data ? data.publicUrl : null;
