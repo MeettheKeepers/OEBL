@@ -432,6 +432,7 @@ let removalRequests = []; // review_removal_requests rows (developer tab)
 let removalRequestReviews = { league:{}, player:{} }; // review_id -> review row, for rendering context in the queue
 let ratingTarget = null;  // { playerId, gameId, existing } when the Rate Player modal is open
 let ratingDraftRating = 0;
+let messageSellerTarget = null; // { listingId, sellerId, sellerName, listingTitle } when the Message Seller modal is open
 let editPlayerReviews = []; // player_reviews rows for the player currently open in the commissioner edit-player modal
 let tabMenuOpen = false;  // whether the hamburger menu dropdown panel is currently open
 
@@ -1185,6 +1186,7 @@ function render(){
   else if(activeTab==='rules') main.innerHTML = renderRules();
   if(lightboxUrl) main.innerHTML += renderLightbox();
   if(ratingTarget) main.innerHTML += renderRatePlayerModal();
+  if(messageSellerTarget) main.innerHTML += renderMessageSellerModal();
 }
 /* ---------- ONBOARDING GATE (contact info + rules acknowledgment) ---------- */
 function renderOnboardingGate(){
@@ -2488,6 +2490,44 @@ async function submitPlayerReview(){
   showToast('Rating saved ✓');
   closeRatePlayer();
 }
+
+/* ---------- MESSAGE SELLER (Sell/Swap) ---------- */
+function openMessageSeller(listingId, sellerId, sellerName, listingTitle){
+  messageSellerTarget = { listingId, sellerId, sellerName, listingTitle };
+  render();
+}
+function closeMessageSeller(){ messageSellerTarget = null; render(); }
+function renderMessageSellerModal(){
+  const t = messageSellerTarget;
+  return `
+  <div style="position:fixed;inset:0;background:rgba(10,13,18,.6);z-index:55;display:flex;align-items:center;justify-content:center;padding:24px;" onclick="if(event.target===this) closeMessageSeller()">
+    <div class="panel" style="max-width:420px;width:100%;margin:0;">
+      <div class="row-flex" style="margin-bottom:4px;">
+        <h2 class="section-title" style="margin-bottom:0;">Message ${t.sellerName}</h2>
+        <button class="btn ghost small" onclick="closeMessageSeller()">✕</button>
+      </div>
+      <p class="section-sub">About: ${t.listingTitle.replace(/</g,'&lt;')}</p>
+      <textarea id="sellerMsgText" rows="3" placeholder="e.g. Is this still available?"></textarea>
+      <button class="btn purple small" style="margin-top:8px;" onclick="sendSellerMessage()">Send</button>
+      <div class="hint" style="margin-top:8px;">Sends a push notification to ${t.sellerName} with your message.</div>
+    </div>
+  </div>`;
+}
+async function sendSellerMessage(){
+  const t = messageSellerTarget;
+  const text = document.getElementById('sellerMsgText').value.trim();
+  if(!text){ showToast('Enter a message first'); return; }
+  const message = `Re: "${t.listingTitle}" — ${text}`;
+  const { error } = await sb.from('direct_messages').insert({
+    league_id: activeLeague, sender_id: me.id, sender_name: me.name, recipient_ids: [t.sellerId], message,
+  });
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast('Sending…');
+  const result = await callAdmin('notify-listing-message', { listing_id: t.listingId, message });
+  closeMessageSeller();
+  if(result.error){ showToast('Saved, but push failed: '+result.error); }
+  else { showToast(result.sent ? 'Message sent ✓' : `Sent — ${t.sellerName} hasn't enabled notifications yet, but it's on record.`); }
+}
 async function loadPlayerReviewsFor(playerId){
   const { data } = await sb.from('player_reviews').select('*').eq('subject_id', playerId).order('created_at', { ascending:false });
   editPlayerReviews = data || [];
@@ -2624,7 +2664,7 @@ function renderMerch(){
         <div class="merch-body">
           <div class="merch-name">${m.name}</div>
           <div class="merch-price">$${(m.price_cents/100).toFixed(2)}</div>
-          <button class="btn small" onclick="addToCart('${m.id}')">Add to Cart</button>
+          <button class="btn purple small" onclick="addToCart('${m.id}')">Add to Cart</button>
           ${me.is_commissioner ? `<div style="display:flex;gap:6px;margin-top:8px;">
             <button class="btn ghost small" onclick="openMerchForm('${m.id}')">Edit</button>
             <button class="btn ghost small" onclick="deleteMerchItem('${m.id}','${(m.name||'').replace(/'/g,"\\'")}')">Delete</button>
@@ -2722,7 +2762,7 @@ function renderSellSwap(){
       if(l.status==='active'){
         if(commission){
           actionsHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
-            <button class="btn small" onclick="markListingSold('${l.id}','on_app','${titleEsc}','${l.user_id}')">Mark Sold</button>
+            <button class="btn purple small" onclick="markListingSold('${l.id}','on_app','${titleEsc}','${l.user_id}')">Mark Sold</button>
             <button class="btn ghost small" onclick="deleteListing('${l.id}','${titleEsc}')">Remove</button>
           </div>`;
         } else {
@@ -2732,6 +2772,9 @@ function renderSellSwap(){
         actionsHTML = `<button class="btn ghost small" style="margin-top:10px;" onclick="deleteListing('${l.id}','${titleEsc}')">Remove Listing</button>`;
       }
     }
+    const messageBtnHTML = (l.user_id!==me.id && l.status==='active')
+      ? `<button class="btn purple small" style="margin-top:10px;" onclick="openMessageSeller('${l.id}','${l.user_id}','${(poster?poster.name:'Seller').replace(/'/g,"\\'")}','${titleEsc}')">Message Seller</button>`
+      : '';
     return `<div class="listing-card">
       <div class="merch-img" ${l.image_url?`style="cursor:pointer;" onclick="openLightbox('${l.image_url}')"`:''}>${l.image_url ? `<img src="${l.image_url}">` : '📦'}</div>
       <div class="merch-body">
@@ -2743,6 +2786,7 @@ function renderSellSwap(){
         ${commission && l.status==='active' ? `<div class="hint" style="margin-top:6px;">If sold on the app, 5% ($${commission}) is auto-deducted from your bank roll — no e-transfer needed.</div>` : ''}
         ${statusHTML}
         ${actionsHTML}
+        ${messageBtnHTML}
       </div>
     </div>`;
   };
