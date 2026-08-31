@@ -2479,6 +2479,8 @@ function renderGameLines(){
   const goalieCap = game.goalies||1;
   const defs = buildSlotDefs(game);
   const myAssignment = myLineAssignmentText(game.id, game);
+  const signedUpIds = new Set(signups.filter(x=>x.ice_time_id===game.id).map(x=>x.user_id));
+  const eligiblePlayers = activeRoster().filter(r=>signedUpIds.has(r.id));
 
   const teamColumn = (teamKey, teamLabel, teamNameField)=>{
     const teamLines = lines.filter(l=>l.team===teamKey);
@@ -2490,7 +2492,16 @@ function renderGameLines(){
       const p = pid ? playerById(pid) : null;
       const mine = pid===me.id;
       if(editable){
-        const options = activeRoster().map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
+        // Only players signed up for this game are selectable, so lines can't be stacked
+        // with people who never claimed a spot. If someone is already slotted in but was
+        // later removed from the signup list, keep showing them so their assignment
+        // doesn't silently vanish out from under the dropdown.
+        const optionsPool = eligiblePlayers.slice();
+        if(pid && !optionsPool.some(r=>r.id===pid)){
+          const cur = playerById(pid);
+          if(cur) optionsPool.push(cur);
+        }
+        const options = optionsPool.map(r=>`<option value="${r.id}" ${r.id===pid?'selected':''}>${r.name}${r.claimed?'':' (pending)'}</option>`).join('');
         return `<div class="slot"><div class="pos-lbl">${label}</div>
           <select onchange="setLineSlot('${teamKey}','${slotKey}',this.value)"><option value="">— empty —</option>${options}</select></div>`;
       }
@@ -2522,7 +2533,7 @@ function renderGameLines(){
     ${editable ? `<button class="btn purple small" onclick="autoFillLines()">Auto-Fill Lines</button>` : ''}
     ${editable ? `<button class="btn ghost small" onclick="clearLines()">Clear All</button>` : ''}
   </div>
-  ${editable ? `<p class="hint" style="margin-bottom:12px;">Auto-Fill balances both teams by skill level and each player's preferred position, using who's signed up for this game. You can still adjust any slot by hand afterward.</p>` : ''}
+  ${editable ? `<p class="hint" style="margin-bottom:12px;">Auto-Fill balances both teams by skill level and each player's preferred position, using who's signed up for this game. You can still adjust any slot by hand afterward. Only players signed up for this game appear in the dropdowns below${eligiblePlayers.length ? '' : ' — nobody has signed up yet'}.</p>` : ''}
   <div class="hint" style="margin-bottom:12px;">${game.referee_id ? 'Referee: '+(playerById(game.referee_id)?.name||'Assigned') : 'Referee: not yet assigned'}</div>
   <div class="grid cols-2" style="align-items:start;">
     ${teamColumn('A', game.team_a_name || 'Team Light', 'team_a_name')}
