@@ -397,6 +397,10 @@ let chatPinnedId = null;  // leagues.pinned_message_id for the active league
 let chatPollTimer = null; // setInterval handle while the Chat tab is open
 let newChatBody = '';     // composer text (survives re-renders from polling)
 let chatUnread = false;   // whether the header chat icon should show its red dot
+let chatSection = 'league'; // 'league' | 'listings' — which view of the Chat tab is showing
+let dmMessages = [];      // listing_messages rows involving me, for the active league
+let dmThread = null;      // { listingId, listingTitle, otherId, otherName } when a buy/sell thread is open
+let newDmBody = '';       // composer text for the open buy/sell thread
 
 let roster = [];        // all profiles (for admin roster/lines)
 let iceTimes = [];      // ice_times rows — each one IS a "game" (lines are set per ice time)
@@ -656,7 +660,7 @@ async function setLeague(code){
   render();
 }
 async function loadLeagueData(){
-  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules(), loadLeagueReviews(), loadChat()]);
+  await Promise.all([loadIceTimes(), loadMerch(), loadStats(), loadAnnouncements(), loadArenas(), loadListings(), loadRules(), loadLeagueReviews(), loadChat(), loadDmMessages()]);
 }
 async function loadChat(){
   const [{ data: msgs }, { data: lg }] = await Promise.all([
@@ -665,28 +669,72 @@ async function loadChat(){
   ]);
   chatMessages = msgs || [];
   chatPinnedId = lg ? lg.pinned_message_id : null;
+  refreshChatUnread();
+}
+async function loadDmMessages(){
+  const { data } = await sb.from('listing_messages')
+    .select('*')
+    .eq('league_id', activeLeague)
+    .or(`sender_id.eq.${me.id},recipient_id.eq.${me.id}`)
+    .order('created_at', { ascending:true })
+    .limit(500);
+  dmMessages = data || [];
+  refreshChatUnread();
+}
+function refreshChatUnread(){
   chatUnread = computeChatUnread();
   updateChatDot();
 }
 function computeChatUnread(){
-  if(!chatMessages.length) return false;
-  const last = chatMessages[chatMessages.length-1];
-  if(last.user_id===me.id) return false;
-  if(!me.chat_last_seen_at) return true;
-  return new Date(last.created_at) > new Date(me.chat_last_seen_at);
+  let leagueUnread = false;
+  if(chatMessages.length){
+    const last = chatMessages[chatMessages.length-1];
+    if(last.user_id!==me.id){
+      leagueUnread = !me.chat_last_seen_at || new Date(last.created_at) > new Date(me.chat_last_seen_at);
+    }
+  }
+  const dmUnread = dmMessages.some(m=>m.recipient_id===me.id && !m.read_at);
+  return leagueUnread || dmUnread;
 }
 function updateChatDot(){
   const dot = document.getElementById('chatDot');
   if(dot) dot.style.display = chatUnread ? 'block' : 'none';
 }
 async function markChatSeen(){
-  chatUnread = false;
-  updateChatDot();
-  if(!chatMessages.length) return;
-  const last = chatMessages[chatMessages.length-1];
-  if(me.chat_last_seen_at && new Date(last.created_at) <= new Date(me.chat_last_seen_at)) return;
-  me.chat_last_seen_at = new Date().toISOString();
-  sb.from('profiles').update({ chat_last_seen_at: me.chat_last_seen_at }).eq('id', me.id).then(()=>{}, ()=>{});
+  if(chatMessages.length){
+    const last = chatMessages[chatMessages.length-1];
+    if(!me.chat_last_seen_at || new Date(last.created_at) > new Date(me.chat_last_seen_at)){
+      me.chat_last_seen_at = new Date().toISOString();
+      sb.from('profiles').update({ chat_last_seen_at: me.chat_last_seen_at }).eq('id', me.id).then(()=>{}, ()=>{});
+    }
+  }
+  refreshChatUnread();
+}
+function dmThreads(){
+  const map = new Map();
+  dmMessages.forEach(m=>{
+    const otherId = m.sender_id===me.id ? m.recipient_id : m.sender_id;
+    const key = (m.listing_id||'none') + '|' + otherId;
+    if(!map.has(key)) map.set(key, { listingId:m.listing_id, listingTitle:m.listing_title, otherId, nameFromMsg:null, messages:[] });
+    const t = map.get(key);
+    t.messages.push(m);
+    if(m.sender_id!==me.id && !t.nameFromMsg) t.nameFromMsg = m.sender_name;
+  });
+  return Array.from(map.values()).map(t=>{
+    const p = playerById(t.otherId);
+    return {
+      ...t,
+      otherName: (p && p.name) || t.nameFromMsg || 'Player',
+      last: t.messages[t.messages.length-1],
+      unread: t.messages.some(m=>m.recipient_id===me.id && !m.read_at),
+    };
+  }).sort((a,b)=> new Date(b.last.created_at) - new Date(a.last.created_at));
+}
+async function markDmThreadRead(t){
+  const unreadIds = t.messages.filter(m=>m.recipient_id===me.id && !m.read_at).map(m=>m.id);
+  if(!unreadIds.length) return;
+  await sb.from('listing_messages').update({ read_at: new Date().toISOString() }).in('id', unreadIds);
+  await loadDmMessages();
 }
 async function loadLeagueReviews(){
   const { data } = await sb.from('league_reviews').select('*').eq('league_id', activeLeague).order('created_at', { ascending:false });
@@ -1162,7 +1210,13 @@ function render(){
   if(gated){ main.innerHTML = renderOnboardingGate(); return; }
   if(activeTab==='dashboard') main.innerHTML = renderDashboard();
   else if(activeTab==='announcements') main.innerHTML = renderAnnouncements();
-  else if(activeTab==='chat'){ main.innerHTML = renderChat(); scrollChatToBottom(); }
+  else if(activeTab==='chat'){
+    const scrollId = (chatSection==='listings' && dmThread) ? 'dmScroll' : 'chatScroll';
+    const prevScrollEl = document.getElementById(scrollId);
+    const wasNearBottom = !prevScrollEl || (prevScrollEl.scrollHeight - prevScrollEl.scrollTop - prevScrollEl.clientHeight < 80);
+    main.innerHTML = renderChat();
+    if(wasNearBottom) scrollChatToBottom(scrollId);
+  }
   else if(activeTab==='profile') main.innerHTML = renderProfile();
   else if(activeTab==='icetimes') main.innerHTML = renderIceTimes();
   else if(activeTab==='lines') main.innerHTML = renderLinesView();
@@ -2517,16 +2571,20 @@ async function sendSellerMessage(){
   const t = messageSellerTarget;
   const text = document.getElementById('sellerMsgText').value.trim();
   if(!text){ showToast('Enter a message first'); return; }
-  const message = `Re: "${t.listingTitle}" — ${text}`;
-  const { error } = await sb.from('direct_messages').insert({
-    league_id: activeLeague, sender_id: me.id, sender_name: me.name, recipient_ids: [t.sellerId], message,
+  const { error } = await sb.from('listing_messages').insert({
+    league_id: activeLeague, listing_id: t.listingId, listing_title: t.listingTitle,
+    sender_id: me.id, sender_name: me.name, recipient_id: t.sellerId, message: text,
   });
   if(error){ showToast('Failed: '+error.message); return; }
-  showToast('Sending…');
-  const result = await callAdmin('notify-listing-message', { listing_id: t.listingId, message });
+  showToast('Message sent ✓');
+  callAdmin('notify-listing-message', { listing_id: t.listingId, recipient_id: t.sellerId, message: text }).catch(()=>{});
   closeMessageSeller();
-  if(result.error){ showToast('Saved, but push failed: '+result.error); }
-  else { showToast(result.sent ? 'Message sent ✓' : `Sent — ${t.sellerName} hasn't enabled notifications yet, but it's on record.`); }
+  await loadDmMessages();
+  activeTab = 'chat';
+  chatSection = 'listings';
+  renderTabs(tabsForRole(role));
+  closeTabMenu();
+  await openDmThread(t.listingId, t.sellerId);
 }
 async function loadPlayerReviewsFor(playerId){
   const { data } = await sb.from('player_reviews').select('*').eq('subject_id', playerId).order('created_at', { ascending:false });
@@ -2835,6 +2893,53 @@ function chatTime(ts){
   return new Date(ts).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
 }
 function renderChat(){
+  const threads = dmThreads();
+  const dmUnreadCount = threads.filter(t=>t.unread).length;
+  const subnav = `
+  <div class="row-flex" style="gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+    <button class="btn ${chatSection==='league'?'purple':'ghost'} small" onclick="switchChatSection('league')">League Chat</button>
+    <button class="btn ${chatSection==='listings'?'purple':'ghost'} small" onclick="switchChatSection('listings')">Buy &amp; Sell Messages${dmUnreadCount ? ` <span class="tag" style="background:var(--danger);color:#fff;margin-left:6px;">${dmUnreadCount}</span>` : ''}</button>
+  </div>`;
+  if(chatSection==='listings'){
+    return subnav + (dmThread ? renderDmThreadView(threads) : renderDmThreadsList(threads));
+  }
+  return subnav + renderLeagueChat();
+}
+function renderDmThreadsList(threads){
+  if(!threads.length) return `<div class="empty">No buy/sell messages yet. Message a seller from the Sell/Swap tab to start a conversation.</div>`;
+  return `<div>${threads.map(t=>`
+    <div class="panel" style="margin-bottom:10px;cursor:pointer;${t.unread?'border:1px solid var(--teal);':''}" onclick="openDmThread('${t.listingId||''}','${t.otherId}')">
+      <div class="row-flex" style="margin-bottom:2px;">
+        <strong style="font-size:14px;">${(t.otherName||'Player').replace(/</g,'&lt;')}</strong>
+        <span class="hint">${chatTime(t.last.created_at)}</span>
+      </div>
+      <div class="hint" style="margin-bottom:4px;">Re: ${(t.listingTitle||'').replace(/</g,'&lt;')}</div>
+      <div style="font-size:14px;${t.unread?'font-weight:600;':''}">${t.last.sender_id===me.id?'You: ':''}${(t.last.message||'').replace(/</g,'&lt;')}</div>
+      ${t.unread ? `<span class="tag" style="background:var(--danger);color:#fff;margin-top:6px;display:inline-block;">New</span>` : ''}
+    </div>`).join('')}</div>`;
+}
+function renderDmThreadView(threads){
+  const t = dmThread;
+  const found = threads.find(x=> (x.listingId||'')===(t.listingId||'') && x.otherId===t.otherId);
+  const list = found ? found.messages : [];
+  const msgsHTML = list.length ? list.map(m=>{
+    const mine = m.sender_id===me.id;
+    return `<div style="margin-bottom:10px;${mine?'text-align:right;':''}">
+      <div class="hint" style="margin-bottom:2px;">${mine?'You':(m.sender_name||'Player').replace(/</g,'&lt;')} · ${chatTime(m.created_at)}</div>
+      <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;display:inline-block;max-width:85%;text-align:left;">${(m.message||'').replace(/</g,'&lt;')}</div>
+    </div>`;
+  }).join('') : '<div class="empty">No messages yet.</div>';
+  return `
+  <button class="btn ghost small" style="margin-bottom:10px;" onclick="closeDmThread()">← Back to messages</button>
+  <h3 style="font-size:15px;margin-top:0;">${(t.otherName||'Player').replace(/</g,'&lt;')}</h3>
+  <p class="section-sub">Re: ${(t.listingTitle||'').replace(/</g,'&lt;')}</p>
+  <div id="dmScroll" style="max-height:420px;overflow-y:auto;padding:4px 4px 0;margin-bottom:12px;">${msgsHTML}</div>
+  <div class="panel" style="display:flex;gap:8px;align-items:flex-end;">
+    <div class="field" style="flex:1;margin:0;"><textarea id="dmBody" rows="2" placeholder="Message ${(t.otherName||'Player').replace(/</g,'&lt;')}…" oninput="newDmBody=this.value" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendDmThreadMessage();}">${(newDmBody||'').replace(/</g,'&lt;')}</textarea></div>
+    <button class="btn purple small" onclick="sendDmThreadMessage()">Send</button>
+  </div>`;
+}
+function renderLeagueChat(){
   const pinned = chatPinnedId ? chatMessages.find(m=>m.id===chatPinnedId) : null;
   const pinnedHTML = pinned ? `
     <div class="panel" style="margin-bottom:14px;border:1px solid var(--teal);">
@@ -2911,24 +3016,59 @@ async function unpinChatMessage(){
   render();
 }
 async function openChat(){
-  await loadChat();
+  chatSection = 'league';
+  dmThread = null;
+  await Promise.all([loadChat(), loadDmMessages()]);
   await markChatSeen();
   render();
+}
+function switchChatSection(section){
+  chatSection = section;
+  if(section!=='listings') dmThread = null;
+  render();
+}
+async function openDmThread(listingId, otherId){
+  const t = dmThreads().find(x=> (x.listingId||'')===(listingId||'') && x.otherId===otherId);
+  if(!t) return;
+  dmThread = { listingId: t.listingId, listingTitle: t.listingTitle, otherId: t.otherId, otherName: t.otherName };
+  render();
+  await markDmThreadRead(t);
+  refreshChatUnread();
+  render();
+}
+function closeDmThread(){ dmThread = null; render(); }
+async function sendDmThreadMessage(){
+  const t = dmThread;
+  if(!t) return;
+  const body = (newDmBody||'').trim();
+  if(!body) return;
+  const { error } = await sb.from('listing_messages').insert({
+    league_id: activeLeague, listing_id: t.listingId || null, listing_title: t.listingTitle,
+    sender_id: me.id, sender_name: me.name, recipient_id: t.otherId, message: body,
+  });
+  if(error){ showToast('Failed: '+error.message); return; }
+  newDmBody = '';
+  await loadDmMessages();
+  render();
+  if(t.listingId){
+    callAdmin('notify-listing-message', { listing_id: t.listingId, recipient_id: t.otherId, message: body }).catch(()=>{});
+  }
 }
 function startChatWatch(){
   stopChatWatch();
   chatPollTimer = setInterval(async()=>{
     const active = document.activeElement;
-    if(activeTab==='chat' && active && active.id==='chatBody') return; // don't interrupt someone mid-typing
-    await loadChat();
-    if(activeTab==='chat'){ await markChatSeen(); render(); }
+    if(activeTab==='chat' && active && (active.id==='chatBody' || active.id==='dmBody')) return; // don't interrupt someone mid-typing
+    await Promise.all([loadChat(), loadDmMessages()]);
+    if(activeTab==='chat'){ if(chatSection==='league') await markChatSeen(); render(); }
   }, 5000);
 }
 function stopChatWatch(){
   if(chatPollTimer){ clearInterval(chatPollTimer); chatPollTimer = null; }
 }
-function scrollChatToBottom(){
-  setTimeout(()=>{ const el = document.getElementById('chatScroll'); if(el) el.scrollTop = el.scrollHeight; }, 0);
+function scrollChatToBottom(id){
+  id = id || 'chatScroll';
+  setTimeout(()=>{ const el = document.getElementById(id); if(el) el.scrollTop = el.scrollHeight; }, 0);
 }
 
 /* ---------- ADMIN: POST ICE TIME ---------- */
