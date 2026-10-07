@@ -155,7 +155,7 @@
     background:#e05a5a;border:2px solid var(--header-bg);
   }
 
-  nav.league-tabs{
+  nav.league-tabs{display:none !important;
     display:flex;gap:2px;max-width:1080px;margin:0 auto;padding:0 24px;
     border-bottom:1px solid var(--line);
   }
@@ -513,7 +513,7 @@ async function enterApp(sess){
   me.referee_arenas = me.referee_arenas || {};
   me.goalie_arenas = me.goalie_arenas || {};
   me.gender = me.gender || null;
-  me.leagues = me.leagues || [];
+  me.leagues = ['OEBL']; // single league for now
   me.skill_level = me.skill_level || null;
   me.skill_level_locked = !!me.skill_level_locked;
   me.referee_skill_level = me.referee_skill_level || null;
@@ -817,7 +817,7 @@ function renderPlayerDirectory(){
     <input value="${(searchFilters.directoryQuery||'').replace(/"/g,'&quot;')}" oninput="searchFilters.directoryQuery=this.value;render()" placeholder="e.g. Alex">
   </div>
   <div class="panel"><div class="table-scroll">
-    <table><thead><tr><th>Name</th><th>Skill Level</th><th>Positions</th><th>Current Leagues</th><th>Action</th></tr></thead>
+    <table><thead><tr><th>Name</th><th>Skill Level</th><th>Positions</th><th>Action</th></tr></thead>
     <tbody>
     ${list.map(p=>{
       const already = (p.leagues||[]).includes(activeLeague);
@@ -825,10 +825,9 @@ function renderPlayerDirectory(){
         <td>${p.name}</td>
         <td>${p.skill_level || '—'}</td>
         <td>${(p.positions||[]).join(', ') || '—'}</td>
-        <td>${(p.leagues||[]).join(', ') || '—'}</td>
         <td>${already ? `<span class="tag pos">Already in ${activeLeague}</span>` : `<button class="btn ghost small" onclick="addPlayerToMyLeague('${p.id}','${p.name.replace(/'/g,"\\'")}')">Add to ${activeLeague}</button>`}</td>
       </tr>`;
-    }).join('') || `<tr><td colspan="5" class="hint">No players match.</td></tr>`}
+    }).join('') || `<tr><td colspan="4" class="hint">No players match.</td></tr>`}
     </tbody></table>
   </div></div>`;
 }
@@ -1065,8 +1064,6 @@ function adminTabs(){
     {id:'openice', label:'Open Ice'},
     {id:'rules', label:'Rules'},
   ];
-  if(hasProAccess()) tabs.splice(6, 0, {id:'directory', label:'Player Directory'});
-  if(isGlobalCommish()) tabs.push({id:'manageleagues', label:'Manage Leagues'});
   return tabs;
 }
 function tabsForRole(r){
@@ -1352,7 +1349,7 @@ function renderRules(){
     : '';
   if(me.is_commissioner && editingRules){
     return `
-    <h2 class="section-title">League Agreement and Rules — ${activeLeague}</h2>
+    <h2 class="section-title">League Agreement and Rules</h2>
     <p class="section-sub">Players see this the first time they sign in, and can always come back to this tab. It's read-only for them.</p>
     <div class="panel" style="margin-bottom:16px;">
       <div class="field"><label>League Agreement</label><textarea id="rulesAgreementInput" rows="12" placeholder="Type the league agreement here...">${agreement}</textarea></div>
@@ -1377,7 +1374,7 @@ function renderRules(){
         </label>
       </div>`;
   return `
-  <h2 class="section-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">League Agreement and Rules — ${activeLeague} ${leagueReviews.length ? `${starsHTML(avgLeagueRating())}<span class="hint">(${leagueReviews.length} review${leagueReviews.length===1?'':'s'})</span>` : `<span class="hint">No reviews yet</span>`}</h2>
+  <h2 class="section-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">League Agreement and Rules ${leagueReviews.length ? `${starsHTML(avgLeagueRating())}<span class="hint">(${leagueReviews.length} review${leagueReviews.length===1?'':'s'})</span>` : `<span class="hint">No reviews yet</span>`}</h2>
   <p class="section-sub">${me.is_commissioner ? 'Visible to all players. Read-only for non-commissioners.' : 'Please read and follow the league agreement and rules below.'}</p>
   <div class="panel" style="margin-bottom:16px;background:rgba(0,0,0,.04);border-color:var(--teal-dim);">
     <p style="margin:0;font-size:13px;">You must acknowledge that you have read and understood the terms and conditions of playing with OBL — check the box at the bottom of this page to confirm.</p>
@@ -1487,8 +1484,8 @@ function renderAnnouncements(){
       ${me.is_commissioner ? `<button class="btn ghost small" style="margin-top:8px;" onclick="deleteAnnouncement('${a.id}')">Delete</button>` : ''}
     </div>`).join('') : '<div class="empty">No announcements yet.</div>';
   return `
-  <h2 class="section-title">Announcements — ${activeLeague}</h2>
-  <p class="section-sub">Updates and reminders from the commissioner for ${leagueName()}.</p>
+  <h2 class="section-title">Announcements</h2>
+  <p class="section-sub">Updates and reminders from the commissioner .</p>
   ${compose}
   ${list}`;
 }
@@ -1534,8 +1531,8 @@ function renderDashboard(){
   const totalAssists = myStats.reduce((a,s)=>a+s.assists,0);
 
   return `
-  <h2 class="section-title">Dashboard — ${activeLeague}</h2>
-  <p class="section-sub">Your snapshot for ${leagueName()}.</p>
+  <h2 class="section-title">Dashboard</h2>
+  <p class="section-sub">Your snapshot .</p>
   <div class="grid cols-2">
     <div class="panel">
       <h3 style="margin-top:0;font-size:15px;color:var(--teal)">My Profile</h3>
@@ -1575,10 +1572,10 @@ function renderAdminDashboard(){
   const activePlayers = activeRoster().length;
 
   return `
-  <h2 class="section-title">Dashboard — ${activeLeague}</h2>
-  <p class="section-sub">Commissioner snapshot for ${leagueName()}. Click any game to manage it.</p>
+  <h2 class="section-title">Dashboard</h2>
+  <p class="section-sub">Commissioner snapshot . Click any game to manage it.</p>
   <div class="panel" style="margin-bottom:16px;">
-    <div class="hint">${upcoming.length} upcoming game${upcoming.length===1?'':'s'} · ${activePlayers} active player${activePlayers===1?'':'s'} in ${leagueName()}</div>
+    <div class="hint">${upcoming.length} upcoming game${upcoming.length===1?'':'s'} · ${activePlayers} active player${activePlayers===1?'':'s'}</div>
   </div>
   <h3 style="font-size:15px;color:var(--teal);margin-bottom:8px;">Upcoming Games</h3>
   ${upcoming.length ? `<div style="display:flex;gap:14px;overflow-x:auto;padding-bottom:10px;">
@@ -1632,22 +1629,6 @@ function renderPlayerProfile(){
           ${POSITIONS.map(p=>{ const rank = me.positions.indexOf(p); return `<div class="chip ${rank>-1?'on':''}" onclick="togglePos('${p}')">${rank>-1?'#'+(rank+1)+' ':''}${p}</div>`; }).join('')}
         </div>
         <div class="hint" style="margin-top:6px;">Order matters for LW/C/RW/LD/RD — when spots fill up in a game, we try to place you in your top pick first.</div>
-      </div>
-      <div class="field">
-        <label>Leagues you play in</label>
-        <div class="chips" id="leagueChips">
-          ${publicLeagues().map(([code,name])=>`<div class="chip ${(me.leagues||[]).includes(code)?'on':''}" onclick="toggleLeague('${code}')" title="${name}">${code}</div>`).join('')}
-        </div>
-        <div class="hint" style="margin-top:6px;">You'll only show up on the Roster for the league(s) you select here. Pick just one if you only play in one league.</div>
-      </div>
-      <div class="field" style="max-width:280px;">
-        <label>Have an invite code?</label>
-        <div style="display:flex;gap:8px;">
-          <input id="inviteCodeInput" placeholder="e.g. AB12CD34" style="text-transform:uppercase;">
-          <button type="button" class="btn ghost small" onclick="joinByInviteCode()">Join</button>
-        </div>
-        <div class="hint" style="margin-top:4px;">Independent commissioners running a private league will share a code with you — enter it here to get access.</div>
-        <div id="inviteCodeMsg" class="hint" style="color:var(--danger);min-height:16px;"></div>
       </div>
       <button class="btn purple" style="margin-top:10px" onclick="saveProfile()">Save Profile</button>
     </div>
@@ -1705,7 +1686,7 @@ function renderPlayerProfile(){
     <button class="btn purple" style="margin-top:14px;display:block;" onclick="saveProfile()">Save Profile</button>
   </div>
   <div class="panel" style="margin-top:16px;">
-    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas — ${activeLeague}</h3>
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas</h3>
     <p class="hint" style="margin-bottom:10px;">Click arenas in the order you prefer them (up to 5). Your #1 pick is ranked first.</p>
     <div class="chips">
       ${arenas.length ? arenas.map(a=>{
@@ -1920,7 +1901,7 @@ function renderRefereeProfile(){
     <button class="btn purple" style="margin-top:4px" onclick="saveRefereeProfile()">Save Referee Profile</button>
   </div>
   <div class="panel" style="margin-top:16px;">
-    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas &amp; Rates — ${activeLeague}</h3>
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas &amp; Rates</h3>
     <p class="hint" style="margin-bottom:10px;">Rank the arenas you're willing to ref at (up to 5) and set what you charge per game at each.</p>
     <div class="chips" style="margin-bottom:14px;">
       ${arenas.length ? arenas.map(a=>{
@@ -2040,7 +2021,7 @@ function renderGoalieProfile(){
     <button class="btn purple" style="margin-top:4px" onclick="saveGoalieProfile()">Save Goalie Profile</button>
   </div>
   <div class="panel" style="margin-top:16px;">
-    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas &amp; Rates — ${activeLeague}</h3>
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas &amp; Rates</h3>
     <p class="hint" style="margin-bottom:10px;">Rank the arenas you're willing to play at (up to 5) and set what you charge per game at each.</p>
     <div class="chips" style="margin-bottom:14px;">
       ${arenas.length ? arenas.map(a=>{
@@ -2140,8 +2121,8 @@ async function markIceTimeBooked(id, dateLabel){
 function freeAgentListFor(iceTimeId){ return freeAgentList.filter(w=>w.ice_time_id===iceTimeId); }
 function renderIceTimes(){
   return `
-  <h2 class="section-title">Upcoming Ice Times — ${activeLeague}</h2>
-  <p class="section-sub">Pick the sessions you're in for in ${leagueName()}. Spots are first-come, first-served.</p>
+  <h2 class="section-title">Upcoming Ice Times</h2>
+  <p class="section-sub">Pick the sessions you're in for. Spots are first-come, first-served.</p>
   <p class="section-sub">Bank Roll: <strong>$${(me.bankroll_cents/100).toFixed(2)}</strong> — to top up, e-transfer <strong>pay@oblhockey.com</strong> (add your name in the message). Allow up to 24 hours to appear.</p>
   ${iceTimes.length ? iceTimes.map(s=>{
     const claimedFor = signups.filter(x=>x.ice_time_id===s.id);
@@ -2229,8 +2210,8 @@ function refereeRoster(){ return roster.filter(p=>(p.positions||[]).includes('RE
 function waitlistFor(iceTimeId){ return refWaitlist.filter(w=>w.ice_time_id===iceTimeId); }
 function renderRefDashboard(){
   return `
-  <h2 class="section-title">Referee Dashboard — ${activeLeague}</h2>
-  <p class="section-sub">Claim games you're available to referee for ${leagueName()}. Colour shows how badly a ref is needed: green = not needed, yellow = wanted, red = needed.</p>
+  <h2 class="section-title">Referee Dashboard</h2>
+  <p class="section-sub">Claim games you're available to referee . Colour shows how badly a ref is needed: green = not needed, yellow = wanted, red = needed.</p>
   ${iceTimes.length ? iceTimes.map(it=>{
     const assignedTo = it.referee_id ? playerById(it.referee_id) : null;
     const mine = it.referee_id === me.id;
@@ -2349,8 +2330,8 @@ function goalieRoster(){ return roster.filter(p=>(p.positions||[]).includes('G')
 function goalieWaitlistFor(iceTimeId){ return goalieWaitlist.filter(w=>w.ice_time_id===iceTimeId); }
 function renderGoalieDashboard(){
   return `
-  <h2 class="section-title">Goalie Dashboard — ${activeLeague}</h2>
-  <p class="section-sub">Claim games you're available to play goalie for ${leagueName()}. Colour shows how badly a goalie is needed: green = not needed, yellow = wanted, red = needed.</p>
+  <h2 class="section-title">Goalie Dashboard</h2>
+  <p class="section-sub">Claim games you're available to play goalie . Colour shows how badly a goalie is needed: green = not needed, yellow = wanted, red = needed.</p>
   ${iceTimes.length ? iceTimes.map(it=>{
     const assignedTo = it.goalie_id ? playerById(it.goalie_id) : null;
     const mine = it.goalie_id === me.id;
@@ -2815,7 +2796,7 @@ function renderStats(){
   const totalGoals = mine.reduce((a,s)=>a+s.goals,0);
   const totalAssists = mine.reduce((a,s)=>a+s.assists,0);
   return `
-  <h2 class="section-title">My Stats — ${activeLeague}</h2>
+  <h2 class="section-title">My Stats</h2>
   <p class="section-sub">Enter your own goals and assists per game — a commissioner can also adjust these.</p>
   <div class="panel">
   <table>
@@ -2860,8 +2841,10 @@ async function uploadListingImage(file){
 function openMerchForm(id){
   const item = id ? merch.find(x=>x.id===id) : null;
   editingMerchId = item ? item.id : 'new';
-  merchDraft = item ? { name:item.name, price_cents:item.price_cents, icon:item.icon||'', image_url:item.image_url||'' }
-                     : { name:'', price_cents:0, icon:'', image_url:'' };
+  merchDraft = item ? { name:item.name, price_cents:item.price_cents, icon:item.icon||'', image_url:item.image_url||'',
+                        custom_size:!!item.custom_size, custom_number:!!item.custom_number, custom_name:!!item.custom_name,
+                        size_options:item.size_options||'S,M,L,XL,XXL', size_chart_url:item.size_chart_url||'' }
+                     : { name:'', price_cents:0, icon:'', image_url:'', custom_size:false, custom_number:false, custom_name:false, size_options:'S,M,L,XL,XXL', size_chart_url:'' };
   render();
 }
 function closeMerchForm(){ editingMerchId = null; merchDraft = null; render(); }
@@ -2871,6 +2854,23 @@ async function onMerchImagePicked(input){
   const url = await uploadListingImage(input.files[0]);
   if(url){ merchDraft.image_url = url; showToast('Image uploaded ✓'); render(); }
 }
+async function onMerchSizeChartPicked(input){
+  if(!input.files || !input.files[0]) return;
+  showToast('Uploading size chart…');
+  const url = await uploadListingImage(input.files[0]);
+  if(url){ merchDraft.size_chart_url = url; showToast('Size chart uploaded ✓'); syncMerchDraftFromForm(); render(); }
+}
+function syncMerchDraftFromForm(){
+  const g = id=>document.getElementById(id);
+  if(g('merchName')) merchDraft.name = g('merchName').value;
+  if(g('merchPrice')) merchDraft.price_cents = Math.round(Number(g('merchPrice').value)*100) || 0;
+  if(g('merchIcon')) merchDraft.icon = g('merchIcon').value;
+  if(g('merchCustSize')) merchDraft.custom_size = g('merchCustSize').checked;
+  if(g('merchCustNumber')) merchDraft.custom_number = g('merchCustNumber').checked;
+  if(g('merchCustName')) merchDraft.custom_name = g('merchCustName').checked;
+  if(g('merchSizeOpts')) merchDraft.size_options = g('merchSizeOpts').value;
+}
+function toggleMerchCustom(){ syncMerchDraftFromForm(); render(); }
 async function saveMerchItem(){
   const nameEl = document.getElementById('merchName');
   const priceEl = document.getElementById('merchPrice');
@@ -2878,8 +2878,13 @@ async function saveMerchItem(){
   merchDraft.name = nameEl.value.trim();
   merchDraft.price_cents = Math.round(Number(priceEl.value)*100) || 0;
   merchDraft.icon = iconEl.value.trim();
+  syncMerchDraftFromForm();
+  merchDraft.name = merchDraft.name.trim();
   if(!merchDraft.name){ showToast('Enter an item name'); return; }
-  const payload = { name: merchDraft.name, price_cents: merchDraft.price_cents, icon: merchDraft.icon || null, image_url: merchDraft.image_url || null, active: true, league_id: activeLeague };
+  const payload = { name: merchDraft.name, price_cents: merchDraft.price_cents, icon: merchDraft.icon || null, image_url: merchDraft.image_url || null, active: true, league_id: activeLeague,
+    custom_size: !!merchDraft.custom_size, custom_number: !!merchDraft.custom_number, custom_name: !!merchDraft.custom_name,
+    size_options: (merchDraft.size_options||'S,M,L,XL,XXL').split(',').map(x=>x.trim()).filter(Boolean).join(',') || 'S,M,L,XL,XXL',
+    size_chart_url: merchDraft.size_chart_url || null };
   let error;
   if(editingMerchId==='new'){
     ({ error } = await sb.from('merch_items').insert(payload));
@@ -2909,6 +2914,18 @@ function renderMerch(){
           <div class="field"><label>Item Name</label><input id="merchName" value="${merchDraft.name||''}"></div>
           <div class="field"><label>Price ($)</label><input id="merchPrice" type="number" min="0" step="0.01" value="${(merchDraft.price_cents/100).toFixed(2)}"></div>
           <div class="field"><label>Emoji (used if no photo)</label><input id="merchIcon" value="${merchDraft.icon||''}" placeholder="🏒"></div>
+          <div class="field">
+            <label>Buyer can customize</label>
+            <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:normal;cursor:pointer;"><input type="checkbox" id="merchCustSize" style="width:auto;" ${merchDraft.custom_size?'checked':''} onchange="toggleMerchCustom()"> Size</label>
+            <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:normal;cursor:pointer;"><input type="checkbox" id="merchCustNumber" style="width:auto;" ${merchDraft.custom_number?'checked':''} onchange="toggleMerchCustom()"> Custom number</label>
+            <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:normal;cursor:pointer;"><input type="checkbox" id="merchCustName" style="width:auto;" ${merchDraft.custom_name?'checked':''} onchange="toggleMerchCustom()"> Custom name</label>
+          </div>
+          ${merchDraft.custom_size ? `
+          <div class="field"><label>Size options (comma separated)</label><input id="merchSizeOpts" value="${(merchDraft.size_options||'').replace(/"/g,'&quot;')}" placeholder="S,M,L,XL,XXL"></div>
+          <div class="field"><label>Sizing chart (image)</label>
+            ${merchDraft.size_chart_url ? `<img src="${merchDraft.size_chart_url}" style="max-width:160px;display:block;margin-bottom:6px;cursor:pointer;" onclick="openLightbox('${merchDraft.size_chart_url}')"><button type="button" class="btn ghost small" style="margin-bottom:6px;" onclick="merchDraft.size_chart_url='';syncMerchDraftFromForm();render()">Remove chart</button>` : ''}
+            <input type="file" accept="image/*" onchange="onMerchSizeChartPicked(this)">
+          </div>` : ''}
         </div>
         <div style="text-align:center;">
           <div class="merch-img" style="border-radius:10px;margin:0 auto 8px;max-width:220px;${merchDraft.image_url?'cursor:pointer;':''}" ${merchDraft.image_url?`onclick="openLightbox('${merchDraft.image_url}')"`:''}>${merchDraft.image_url ? `<img src="${merchDraft.image_url}">` : (merchDraft.icon||'🏒')}</div>
@@ -2927,6 +2944,7 @@ function renderMerch(){
   </div>
   ${me.is_commissioner ? `<button class="btn purple small" style="margin-bottom:14px;" onclick="openMerchForm(null)">+ Add Item</button>` : ''}
   ${form}
+  ${renderMerchOptionsPanel()}
   <div class="grid cols-4">
     ${merch.map(m=>`
       <div class="merch-card">
@@ -2934,6 +2952,7 @@ function renderMerch(){
         <div class="merch-body">
           <div class="merch-name">${m.name}</div>
           <div class="merch-price">$${(m.price_cents/100).toFixed(2)}</div>
+          ${(m.custom_size||m.custom_number||m.custom_name) ? `<div class="hint" style="margin-bottom:6px;">Customizable: ${[m.custom_size?'size':'',m.custom_number?'number':'',m.custom_name?'name':''].filter(Boolean).join(', ')}</div>` : ''}
           <button class="btn purple small" onclick="addToCart('${m.id}')">Add to Cart</button>
           ${me.is_commissioner ? `<div style="display:flex;gap:6px;margin-top:8px;">
             <button class="btn ghost small" onclick="openMerchForm('${m.id}')">Edit</button>
@@ -2946,14 +2965,55 @@ function renderMerch(){
     <div class="row-flex">
       <div>
         <strong>Checkout</strong>
-        <div class="hint">Total: $${(cart.reduce((a,id)=>a+merch.find(m=>m.id===id).price_cents,0)/100).toFixed(2)} · Card payments via Square</div>
+        <div class="hint">Total: $${(cart.reduce((a,c)=>{ const m=merch.find(x=>x.id===c.id); return a+(m?m.price_cents:0); },0)/100).toFixed(2)} · Card payments via Square</div>
       </div>
       <button class="btn purple" style="width:auto" onclick="alert('Coming soon: this will hand off to Square Checkout once your Square account is connected.')" ${cart.length?'':'disabled'}>Checkout with Square</button>
     </div>
+    ${cart.map((c,i)=>{ const m=merch.find(x=>x.id===c.id); if(!m) return '';
+      const opts=[c.size?`Size ${c.size}`:'',c.number?`#${c.number}`:'',c.name?`Name: ${c.name}`:''].filter(Boolean).join(' · ');
+      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:13px;"><span>${m.name}${opts?` <span class="hint">(${opts})</span>`:''}</span><span>$${(m.price_cents/100).toFixed(2)} <a href="#" onclick="removeFromCart(${i});return false;" style="color:var(--danger);margin-left:8px;">remove</a></span></div>`; }).join('')}
   </div>
   `;
 }
-function addToCart(id){ cart.push(id); showToast('Added to cart'); render(); }
+let merchOptions = null; // { id, size, number, name } while choosing customization for an item
+function renderMerchOptionsPanel(){
+  if(!merchOptions) return '';
+  const m = merch.find(x=>x.id===merchOptions.id); if(!m) return '';
+  const sizes = (m.size_options||'S,M,L,XL,XXL').split(',').map(x=>x.trim()).filter(Boolean);
+  return `<div class="panel" style="margin-bottom:16px;border:1px solid var(--teal);">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Customize — ${m.name}</h3>
+    <div class="grid cols-2">
+      <div>
+        ${m.custom_size ? `<div class="field"><label>Size *</label><div class="chips">${sizes.map(sz=>`<div class="chip ${merchOptions.size===sz?'on':''}" onclick="merchOptions.size='${sz}';syncMerchOptionInputs();render()">${sz}</div>`).join('')}</div></div>` : ''}
+        ${m.custom_number ? `<div class="field"><label>Custom number</label><input id="merchOptNumber" inputmode="numeric" maxlength="3" value="${merchOptions.number||''}" placeholder="e.g. 17"></div>` : ''}
+        ${m.custom_name ? `<div class="field"><label>Custom name</label><input id="merchOptName" maxlength="20" value="${(merchOptions.name||'').replace(/"/g,'&quot;')}" placeholder="Name on item"></div>` : ''}
+      </div>
+      ${m.custom_size && m.size_chart_url ? `<div style="text-align:center;"><div class="hint">Sizing chart (tap to enlarge)</div><img src="${m.size_chart_url}" style="max-width:100%;max-height:220px;cursor:pointer;" onclick="openLightbox('${m.size_chart_url}')"></div>` : ''}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="btn purple" onclick="confirmMerchOptions()">Add to Cart</button>
+      <button class="btn ghost" onclick="merchOptions=null;render()">Cancel</button>
+    </div>
+  </div>`;
+}
+function syncMerchOptionInputs(){
+  const n=document.getElementById('merchOptNumber'), nm=document.getElementById('merchOptName');
+  if(n) merchOptions.number=n.value; if(nm) merchOptions.name=nm.value;
+}
+function confirmMerchOptions(){
+  syncMerchOptionInputs();
+  const m = merch.find(x=>x.id===merchOptions.id);
+  if(m.custom_size && !merchOptions.size){ showToast('Pick a size'); return; }
+  const num=(merchOptions.number||'').trim(), nm=(merchOptions.name||'').trim();
+  cart.push({ id:m.id, size:m.custom_size?merchOptions.size:'', number:m.custom_number?num:'', name:m.custom_name?nm:'' });
+  merchOptions=null; showToast('Added to cart'); render();
+}
+function removeFromCart(i){ cart.splice(i,1); render(); }
+function addToCart(id){
+  const m = merch.find(x=>x.id===id);
+  if(m && (m.custom_size||m.custom_number||m.custom_name)){ merchOptions={ id, size:'', number:'', name:'' }; render(); window.scrollTo({top:0,behavior:'smooth'}); return; }
+  cart.push({ id, size:'', number:'', name:'' }); showToast('Added to cart'); render();
+}
 
 /* ---------- SELL / SWAP ---------- */
 function setListingType(t){ newListingType = t; if(t==='giveaway') newListingFree = false; render(); }
@@ -3062,7 +3122,7 @@ function renderSellSwap(){
     </div>`;
   };
   return `
-  <h2 class="section-title">Sell / Swap — ${activeLeague}</h2>
+  <h2 class="section-title">Sell / Swap</h2>
   <p class="section-sub">Sell your used gear or give it away to a teammate. Listings auto-remove after 2 weeks.</p>
   <div class="panel" style="margin-bottom:20px;">
     <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Post an Item</h3>
@@ -3183,8 +3243,8 @@ function renderLeagueChat(){
     </div>`;
   }).join('') : '<div class="empty">No messages yet — say hi 👋</div>';
   return `
-  <h2 class="section-title">Chat — ${activeLeague}</h2>
-  <p class="section-sub">Group chat for ${leagueName()}.${me.is_commissioner ? ' Pin a message to keep it at the top.' : ''}</p>
+  <h2 class="section-title">Chat</h2>
+  <p class="section-sub">Group chat .${me.is_commissioner ? ' Pin a message to keep it at the top.' : ''}</p>
   ${pinnedHTML}
   <div id="chatScroll" style="max-height:420px;overflow-y:auto;padding:4px 4px 0;margin-bottom:12px;">${msgsHTML}</div>
   <div class="panel" style="display:flex;gap:8px;align-items:flex-end;">
@@ -3315,7 +3375,7 @@ function arenaAggregateHTML(){
 }
 function manageArenasHTML(){
   return `<div class="panel" style="margin-bottom:16px;">
-    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Manage Arenas — ${activeLeague}</h3>
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Manage Arenas</h3>
     <p class="hint" style="margin-bottom:12px;">Arenas available for booking and for players to rank in their profile.</p>
     <div class="chips" style="margin-bottom:14px;">
       ${arenas.length ? arenas.map(a=>`<div class="chip on" style="display:flex;align-items:center;gap:8px;">${a.name}
@@ -3366,8 +3426,8 @@ function renderPostIce(){
   const goalieStatusVal = editGame ? (editGame.goalie_status||'none') : 'none';
   const visibilityVal = editGame ? (editGame.visibility||'private') : 'private';
   return `
-  <h2 class="section-title">${editGame ? 'Edit Ice Time' : 'Post New Ice Time'} — ${activeLeague}</h2>
-  <p class="section-sub">${editGame ? `Editing ${iceTimeLabel(editGame)}. Changes save to this existing game — sign-ups, lines, and stats are kept.` : `Open a new session for ${leagueName()} players to sign up for.`}</p>
+  <h2 class="section-title">${editGame ? 'Edit Ice Time' : 'Post New Ice Time'}</h2>
+  <p class="section-sub">${editGame ? `Editing ${iceTimeLabel(editGame)}. Changes save to this existing game — sign-ups, lines, and stats are kept.` : `Open a new session  players to sign up for.`}</p>
   ${editGame ? '' : availabilitySummaryHTML()}
   ${editGame ? '' : arenaAggregateHTML()}
   ${manageArenasHTML()}
@@ -3604,7 +3664,7 @@ async function removePlayerFromGame(iceTimeId, userId, playerName, isBooked){
 /* ---------- ADMIN: SET STATS ---------- */
 function renderSetStats(){
   if(!iceTimes.length){
-    return `<h2 class="section-title">Set Stats — ${activeLeague}</h2>
+    return `<h2 class="section-title">Set Stats</h2>
     <p class="section-sub">Log goals and assists per player for each ${activeLeague} game.</p>
     <div class="empty">No ice times posted yet.</div>`;
   }
@@ -3621,7 +3681,7 @@ function renderSetStats(){
     </tr>`;
   }).join('');
   return `
-  <h2 class="section-title">Set Stats — ${activeLeague}</h2>
+  <h2 class="section-title">Set Stats</h2>
   <p class="section-sub">Log goals and assists per player for the selected ${activeLeague} game. Players can also enter their own — this overrides whatever they've entered.</p>
   <div class="field" style="max-width:320px;"><select onchange="activeStatsGameId=this.value;render()">${opts}</select></div>
   <div class="panel">
@@ -3674,8 +3734,7 @@ function availabilityAggregate(list){
 }
 function activeRoster(){ return roster.filter(p=>!p.archived_at); }
 function rosterForLeague(list){
-  if(rosterShowAllLeagues && isGlobalCommish()) return list;
-  return list.filter(p=> (p.leagues||[]).includes(activeLeague));
+  return list;
 }
 function isOnVacation(p, dateStr){
   const list = p.vacations || [];
@@ -3744,14 +3803,8 @@ function renderRoster(){
   const archivedPlayers = sortedRoster(rosterForLeague(roster.filter(p=>p.archived_at)));
   const showList = rosterView==='archived' ? archivedPlayers : activePlayers;
   return `
-  <h2 class="section-title">Roster — ${activeLeague}</h2>
-  <p class="section-sub">${activePlayers.length} active player${activePlayers.length===1?'':'s'}${archivedPlayers.length?` · ${archivedPlayers.length} archived`:''}${rosterShowAllLeagues?' · showing all leagues':` in ${leagueName()}`}. Sign-in is First Last name + password (no email) — names must be unique.</p>
-  <div class="field" style="max-width:320px;margin-bottom:16px;">
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:normal;">
-      <input type="checkbox" style="width:auto;" ${rosterShowAllLeagues?'checked':''} onchange="rosterShowAllLeagues=this.checked;render()">
-      Show players from all leagues (ignore league selection)
-    </label>
-  </div>
+  <h2 class="section-title">Roster</h2>
+  <p class="section-sub">${activePlayers.length} active player${activePlayers.length===1?'':'s'}${archivedPlayers.length?` · ${archivedPlayers.length} archived`:''}. Sign-in is First Last name + password (no email) — names must be unique.</p>
   ${availabilitySummaryHTML(rosterForLeague(activeRoster()))}
   <div class="panel grid cols-2" style="margin-bottom:16px;">
     <div>
@@ -3779,7 +3832,7 @@ function renderRoster(){
   <div class="panel">
   <div class="table-scroll">
   <table>
-    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Rules Ack.</th><th>Waiver</th><th>Age</th><th>Gender</th><th>Leagues</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
+    <tr><th>Name</th><th>Skill Level</th><th>Bank Roll</th><th>Rules Ack.</th><th>Waiver</th><th>Age</th><th>Gender</th><th>Games</th><th>Injury</th><th>Vacation</th><th>Positions</th><th>Availability</th><th>Actions</th></tr>
     ${showList.length ? showList.map(p=>{
       const inj = INJURY[p.injury_status||'green'];
       const age = calcAge(p.birthdate);
@@ -3796,7 +3849,6 @@ function renderRoster(){
         <td>${p.waiver_signed_at ? `<span class="tag" style="background:rgba(0,0,0,.06);color:var(--good);" title="Signed ${new Date(p.waiver_signed_at).toLocaleString('en-US',{ month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}">${new Date(p.waiver_signed_at).toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric' })}</span>` : `<span class="tag" style="background:var(--danger);color:#fff;">Not yet</span>`}</td>
         <td>${age!==null?age:'—'}</td>
         <td>${p.gender||'—'}</td>
-        <td>${(p.leagues||[]).length ? (p.leagues||[]).map(l=>`<span class="tag pos">${l}</span>`).join('') : '<span class="hint">—</span>'}</td>
         <td>${gamesPlayed(p)}</td>
         <td><span class="tag" style="background:${inj.color};color:#04241a;">${(p.injury_status||'green').toUpperCase()}</span></td>
         <td>${vacationSummary(p)}</td>
@@ -3965,12 +4017,6 @@ function renderEditPlayerModal(){
               ${POSITIONS.map(p=>{ const rank = d.positions.indexOf(p); return `<div class="chip ${rank>-1?'on':''}" onclick="epTogglePos('${p}')">${rank>-1?'#'+(rank+1)+' ':''}${p}</div>`; }).join('')}
             </div>
           </div>
-          <div class="field">
-            <label>Leagues</label>
-            <div class="chips">
-              ${LEAGUES.map(([code,name])=>`<div class="chip ${(d.leagues||[]).includes(code)?'on':''}" onclick="epToggleLeague('${code}')" title="${name}">${code}</div>`).join('')}
-            </div>
-          </div>
         </div>
         <div style="text-align:center;">
           <label style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Skill Level</label>
@@ -4016,7 +4062,7 @@ function renderEditPlayerModal(){
       </div>
 
       <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
-        <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas — ${activeLeague}</h3>
+        <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Preferred Arenas</h3>
         <div class="chips">
           ${arenas.length ? arenas.map(a=>{
             const rank = epArenaPrefList().indexOf(a.id);
@@ -4124,7 +4170,7 @@ async function selectPastGame(id){
 }
 function renderPastGames(){
   if(!pastGames.length){
-    return `<h2 class="section-title">Past Games — ${activeLeague}</h2>
+    return `<h2 class="section-title">Past Games</h2>
     <p class="section-sub">Games are archived automatically the day after they're played. Lines, stats, and scores stay available here.</p>
     <div class="empty">No past games yet.</div>`;
   }
@@ -4151,7 +4197,7 @@ function renderPastGames(){
     </div>`;
   };
   return `
-  <h2 class="section-title">Past Games — ${activeLeague}</h2>
+  <h2 class="section-title">Past Games</h2>
   <p class="section-sub">${pastGames.length} past game${pastGames.length===1?'':'s'}. Games archive automatically the day after they're played.</p>
   <div class="field" style="max-width:360px;"><select onchange="selectPastGame(this.value)">${opts}</select></div>
   <div class="panel" style="margin:12px 0;">
@@ -4183,7 +4229,6 @@ function filteredPlayersForMessage(){
     if(searchFilters.status==='yellow' && p.injury_status!=='yellow') return false;
     if(searchFilters.status==='green' && (p.injury_status||'green')!=='green') return false;
     if(searchFilters.gender!=='any' && p.gender!==searchFilters.gender) return false;
-    if(searchFilters.league!=='any' && !(p.leagues||[]).includes(searchFilters.league)) return false;
     return true;
   });
 }
@@ -4202,14 +4247,10 @@ function renderMessagePlayers(){
   const results = filteredPlayersForMessage();
   const targetCount = selectedPlayerIds.length || results.length;
   return `
-  <h2 class="section-title">Player Finder &amp; Messaging — ${activeLeague}</h2>
+  <h2 class="section-title">Player Finder &amp; Messaging</h2>
   <p class="section-sub">Search the full roster by any combination of league, age, gender, skill rank, position, and status — e.g. "OEBL players, 30–45, Male, rank 5–7" — then message everyone matched or click specific players for a small group message.</p>
   <div class="panel grid cols-3" style="margin-bottom:16px;">
     <div class="field"><label>Name</label><input value="${searchFilters.name}" oninput="updateSearchFilter('name',this.value)" placeholder="Search name…"></div>
-    <div class="field"><label>League</label><select onchange="updateSearchFilter('league',this.value)">
-      <option value="any" ${searchFilters.league==='any'?'selected':''}>Any</option>
-      ${LEAGUES.map(([code,name])=>`<option value="${code}" ${searchFilters.league===code?'selected':''}>${code} — ${name}</option>`).join('')}
-    </select></div>
     <div class="field"><label>Gender</label><select onchange="updateSearchFilter('gender',this.value)">
       <option value="any" ${searchFilters.gender==='any'?'selected':''}>Any</option>
       ${GENDERS.map(g=>`<option value="${g}" ${searchFilters.gender===g?'selected':''}>${g}</option>`).join('')}
