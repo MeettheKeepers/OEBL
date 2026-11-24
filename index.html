@@ -3024,11 +3024,15 @@ const STICK_BRAND_OF = {'Trigger 10 Pro':'CCM','Trigger Unleashed Pro':'CCM','Tr
   'Twitch':'Bauer','Proto 2':'Bauer','Proto R':'Bauer','Pulse':'Bauer','Pulse 2':'Bauer','Sling 2':'Bauer','Tracer':'Bauer','Agent':'Bauer','Flylite':'Bauer','Fuse':'Bauer','Hyper 2':'Bauer'};
 const STICK_CATALOG = {"Trigger 10 Pro":{"LH":{"P29":["40","50","55","65","70","75"],"P28":["30","40","55","70","75","85","95"]},"RH":{"P29":["30","40","50","55","65"],"P28":["30","40","55","65","75","85"]}},"Trigger Unleashed Pro":{"LH":{"P29":["30","40","50","65","70","75"],"P28":["40","75","85"]},"RH":{"P29":["30","40","55","65"],"P28":["30","40","55","65","85"]}},"Twitch":{"LH":{"P92":["30","40","50","55","70","87"],"P28":["30","40","50","65","70","77","87"]},"RH":{"P92":["30","50","70","87"],"P28":["30","50","55","87"]}},"Vizion":{"LH":{"P29":["70","75","85"],"P28":["70","75"]},"RH":{"P29":["70","75","85"],"P28":["70","75","85"]}},"Vizion 2":{"LH":{"P29":["50","55","65"],"P28":["55","65","70"]},"RH":{"P29":["55","65","70","75"],"P28":["55","65","70","75","85"]}},"XF Ghost":{"LH":{"P29":["55","65","70","75","85"],"P28":["55","65","70","75","85"]},"RH":{"P29":["55","65","70","75","85"],"P28":["70","75","85"]}},"Proto 2":{"LH":{"P92":["30","40","50","55","65","70","77","87"],"P28":["30","55","65","70","77","87"]},"RH":{"P92":["30","40","50","55","70","87"],"P28":["30","55","70","77","87"]}},"Proto R":{"LH":{"P92":["50","65","70","77","87"],"P28":["40","77","87"]},"RH":{"P28":["87"]}},"Pulse":{"LH":{"P92":["30","40","50","55","65","70","77","87","102"],"P28":["30","40","50","55","65","70","77","87","102"]},"RH":{"P92":["50","55","65","70","77","87"],"P28":["50","55","65","70","77","87","102"]}},"Pulse 2":{"LH":{"P92":["70","77","87"],"P28":["70","77","87"]},"RH":{"P92":["70","77"],"P28":["70","77","87"]}},"Sling 2":{"LH":{"P92":["50","55","65","70","102"],"P28":["70","102"]},"RH":{"P92":["40","50","55","65"]}},"Tracer":{"LH":{"P92":["40","50","55","65","70","102"],"P28":["87","102"],"P88":["70","87"]},"RH":{"P92":["40","50","55","65","77","87"],"P28":["70","77","87"]}},"Trigger 9 Pro":{"LH":{"P28":["75","85"]},"RH":{"P28":["85"]}},"Agent":{"LH":{"P92":["40","65","70"],"P28":["50","65"]},"RH":{"P92":["40","50","65"],"P28":["50","55","87"]}},"Flylite":{"LH":{"P92":["30","40","50","55","65","70","77","87","102"],"P28":["40","50","55","65","77","87","102"]},"RH":{"P92":["30","40","50","55","70","77","87"],"P28":["30","50","55","77","87"]}},"FT7 Pro":{"LH":{"P29":["65","70","75"],"P28":["75"]},"RH":{"P29":["65","75","85"],"P28":["75","85"]}},"FT8 Pro":{"LH":{"P29":["30","40","50","55","65","70"],"P28":["30","40","50","70","75"]},"RH":{"P29":["30","40","50","55","65","75"],"P28":["30","40","50","55","65","87","95"]}},"FT9 Pro":{"LH":{"P29":["30","40","50","55","65","70","75","85"],"P28":["30","40","50","70","75","85"]},"RH":{"P29":["30","40","50","55","65"],"P28":["30","40","50","55","70","75","85"]}},"Fuse":{"LH":{"P92":["30","40","55","70","77","87"],"P28":["30","65","70","77","87"]},"RH":{"P92":["30","40","50","55","70","77","87"],"P28":["30","50","55","70","77","87"]}},"Hyper 2":{"LH":{"P28":["87"]},"RH":{"P28":["55","87"]}}};
 let stickOrders = [];
+let stickInventory = [];
+let invDraft = { brand:'', model:'', hand:'', curve:'', flex:'', qty:'1' };
 let stickDraft = { player_name:'', brand:'', model:'', hand:'', curve:'', flex:'', qty:'1', notes:'' };
 async function openSticks(){
   const { data, error } = await sb.from('stick_orders').select('*').order('created_at', { ascending:false });
   if(error){ showToast('Could not load sticks: '+error.message); }
   stickOrders = data || [];
+  const inv = await sb.from('stick_inventory').select('*').order('brand').order('model');
+  stickInventory = inv.data || [];
   render();
 }
 function stickDraftSync(){
@@ -3049,10 +3053,17 @@ async function addStickOrder(){
   stickDraftSync();
   const d=stickDraft;
   if(!d.player_name.trim()||!d.brand||!d.model||!d.hand||!d.curve||!d.flex){ showToast('Fill in name, brand, model, hand, curve and flex'); return; }
-  const { error } = await sb.from('stick_orders').insert({ player_name:d.player_name.trim(), brand:d.brand, model:d.model, hand:d.hand, curve:d.curve, flex:d.flex, quantity:Math.max(1, parseInt(d.qty,10)||1), notes:(d.notes||'').trim()||null });
+  const qty = Math.max(1, parseInt(d.qty,10)||1);
+  const inv = stickInvFind(d);
+  const fromStock = !!(inv && inv.quantity >= qty);
+  const { error } = await sb.from('stick_orders').insert({ player_name:d.player_name.trim(), brand:d.brand, model:d.model, hand:d.hand, curve:d.curve, flex:d.flex, quantity:qty, in_stock:fromStock, notes:(d.notes||'').trim()||null });
   if(error){ showToast('Save failed: '+error.message); return; }
+  if(fromStock){
+    await sb.from('stick_inventory').update({ quantity: inv.quantity-qty, updated_at:new Date().toISOString() }).eq('id', inv.id);
+    showToast(`In stock — ${qty} taken from inventory ✓`);
+  }
   stickDraft = { player_name:'', brand:d.brand, model:'', hand:'', curve:'', flex:'', qty:'1', notes:'' };
-  showToast('Stick order added ✓');
+  if(!fromStock) showToast('Not in stock — added to the To Order list');
   await openSticks();
 }
 async function toggleStickFlag(id, field){
@@ -3072,6 +3083,45 @@ async function deleteStickOrder(id){
   if(error){ showToast('Failed: '+error.message); return; }
   stickOrders = stickOrders.filter(x=>x.id!==id); render();
 }
+function stickInvFind(o){ return stickInventory.find(i=>i.brand===o.brand && i.model===o.model && i.hand===o.hand && i.curve===o.curve && i.flex===o.flex); }
+function invDraftSync(){
+  const g=id=>document.getElementById(id);
+  ['Brand','Model','Hand','Curve','Flex','Qty'].forEach(k=>{ const el=g('inv'+k); if(el) invDraft[k.toLowerCase()] = el.value; });
+}
+function invChange(field){
+  invDraftSync();
+  if(field==='brand'){ invDraft.model=''; invDraft.hand=''; invDraft.curve=''; invDraft.flex=''; }
+  if(field==='model'){ invDraft.hand=''; invDraft.curve=''; invDraft.flex=''; }
+  if(field==='hand'){ invDraft.curve=''; invDraft.flex=''; }
+  if(field==='curve'){ invDraft.flex=''; }
+  render();
+}
+async function addStickInventory(){
+  invDraftSync();
+  const d=invDraft, q=Math.max(1, parseInt(d.qty,10)||1);
+  if(!d.brand||!d.model||!d.hand||!d.curve||!d.flex){ showToast('Pick brand, stick, hand, curve and flex'); return; }
+  const existing = stickInvFind(d);
+  let error;
+  if(existing){ ({ error } = await sb.from('stick_inventory').update({ quantity: existing.quantity+q, updated_at:new Date().toISOString() }).eq('id', existing.id)); }
+  else { ({ error } = await sb.from('stick_inventory').insert({ brand:d.brand, model:d.model, hand:d.hand, curve:d.curve, flex:d.flex, quantity:q })); }
+  if(error){ showToast('Save failed: '+error.message); return; }
+  invDraft = { brand:d.brand, model:d.model, hand:d.hand, curve:'', flex:'', qty:'1' };
+  showToast('Added to inventory ✓');
+  await openSticks();
+}
+async function setStickInventoryQty(id, val){
+  const q = Math.max(0, parseInt(val,10)||0);
+  const { error } = await sb.from('stick_inventory').update({ quantity:q, updated_at:new Date().toISOString() }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  const i = stickInventory.find(x=>x.id===id); if(i) i.quantity=q;
+  render();
+}
+async function deleteStickInventory(id){
+  if(!confirm('Remove this stick from inventory?')) return;
+  const { error } = await sb.from('stick_inventory').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  stickInventory = stickInventory.filter(x=>x.id!==id); render();
+}
 function stickStamp(ts){
   if(!ts) return '';
   return `<div class="hint" style="font-size:11px;white-space:nowrap;">${new Date(ts).toLocaleString('en-CA',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}</div>`;
@@ -3086,17 +3136,21 @@ async function downloadStickOrderList(){
   list.forEach(o=>{ const k=[o.brand,o.model,o.hand,o.curve,o.flex].join('|'); (groups[k]=groups[k]||{ o, qty:0, names:[] }); groups[k].qty+=(o.quantity||1); groups[k].names.push((o.quantity||1)>1 ? `${o.player_name} (x${o.quantity})` : o.player_name); });
   const rows = Object.values(groups).sort((a,b)=>(a.o.brand+a.o.model).localeCompare(b.o.brand+b.o.model)).map(g=>
     `<tr><td>${stickEsc(g.o.brand)}</td><td>${stickEsc(g.o.model)}</td><td>${stickEsc(g.o.hand)}</td><td>${stickEsc(g.o.curve)}</td><td>${stickEsc(g.o.flex)}</td><td style="text-align:center">${g.qty}</td><td>${stickEsc(g.names.join(', '))}</td></tr>`).join('');
-  const date = new Date().toLocaleDateString('en-CA',{year:'numeric',month:'long',day:'numeric'});
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Sticks to Order</title>
-  <style>body{font-family:Calibri,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #888;padding:6px 8px;font-size:11pt;} th{background:#1f2a44;color:#fff;text-align:left;}</style></head>
-  <body><h1>OBL Sticks to Order</h1><p>${date} — ${list.reduce((a,o)=>a+(o.quantity||1),0)} stick(s) not in stock</p>
-  <table><tr><th>Brand</th><th>Stick</th><th>Hand</th><th>Curve</th><th>Flex</th><th>Qty</th><th>For</th></tr>${rows}</table></body></html>`;
-  const blob = new Blob(['\ufeff'+html], { type:'application/msword' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'OBL-sticks-to-order-'+new Date().toISOString().slice(0,10)+'.doc';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+  const date = new Date().toISOString().slice(0,10);
+  try{
+    if(!window.XLSX){
+      await new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload=res; sc.onerror=()=>rej(new Error('Could not load Excel library')); document.head.appendChild(sc); });
+    }
+    const data = [['Brand','Stick','Hand','Curve','Flex','Qty','For']];
+    Object.values(groups).sort((a,b)=>(a.o.brand+a.o.model).localeCompare(b.o.brand+b.o.model)).forEach(g=>data.push([g.o.brand,g.o.model,g.o.hand,g.o.curve,g.o.flex,g.qty,g.names.join(', ')]));
+    data.push([]);
+    data.push(['','','','','Total',list.reduce((a,o)=>a+(o.quantity||1),0),'']);
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{wch:10},{wch:24},{wch:6},{wch:8},{wch:6},{wch:6},{wch:50}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sticks to Order');
+    XLSX.writeFile(wb, 'OBL-sticks-to-order-'+date+'.xlsx');
+  }catch(e){ showToast('Export failed: '+e.message); return; }
   if(confirm(`Mark these ${list.length} stick(s) as ORDERED so they don't show up on the next list?\n\n(OK = mark as ordered, Cancel = leave them on the list)`)){
     const ids = list.map(o=>o.id), now = new Date().toISOString();
     const { error } = await sb.from('stick_orders').update({ ordered:true, ordered_at:now }).in('id', ids);
@@ -3116,7 +3170,7 @@ function renderSticks(){
   <h2 class="section-title">Stick Orders</h2>
   <p class="section-sub">${stickOrders.length} order${stickOrders.length===1?'':'s'} · ${outstanding} not yet paid &amp; delivered.</p>
   <div style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-    <button class="btn purple small" onclick="downloadStickOrderList()">Download “To Order” list (Word)</button>
+    <button class="btn purple small" onclick="downloadStickOrderList()">Download “To Order” list (Excel)</button>
     <span class="hint">${stickNeedsOrdering().reduce((a,o)=>a+(o.quantity||1),0)} stick(s) need ordering (not in stock, not yet ordered)</span>
   </div>
   <div class="panel" style="margin-bottom:16px;">
@@ -3130,8 +3184,9 @@ function renderSticks(){
       <div class="field"><label>Hand</label><select id="stkHand" onchange="stickChange('hand')" ${m?'':'disabled'}>${opt(m?['LH','RH']:[],d.hand,'Select hand')}</select></div>
       <div class="field"><label>Curve</label><select id="stkCurve" onchange="stickChange('curve')" ${curves.length?'':'disabled'}>${opt(curves,d.curve,'Select curve')}</select></div>
       <div class="field"><label>Flex</label><select id="stkFlex" onchange="stickChange('flex')" ${flexes.length?'':'disabled'}>${opt(flexes,d.flex,'Select flex')}</select></div>
-      <div class="field"><label>Quantity</label><input id="stkQty" type="number" min="1" step="1" value="${d.qty||1}" onchange="stickDraftSync()"></div>
+      <div class="field"><label>Quantity</label><input id="stkQty" type="number" min="1" step="1" value="${d.qty||1}" onchange="stickChange('qty')"></div>
     </div>
+    ${(d.model&&d.hand&&d.curve&&d.flex) ? (()=>{ const iv=stickInvFind(d), q=Math.max(1,parseInt(d.qty,10)||1); return iv && iv.quantity>=q ? `<div class="tag pos" style="margin-bottom:8px;">In stock: ${iv.quantity} on hand</div>` : `<div class="hint" style="margin-bottom:8px;color:var(--danger);">Not in stock${iv?` (only ${iv.quantity} on hand)`:''} — will go on the To Order list</div>`; })() : ''}
     <div class="field"><label>Notes (optional)</label><input id="stkNotes" value="${(d.notes||'').replace(/"/g,'&quot;')}" onchange="stickDraftSync()"></div>
     <button class="btn purple" onclick="addStickOrder()">Add Order</button>
   </div>
@@ -3140,7 +3195,7 @@ function renderSticks(){
     <tbody>
     ${stickOrders.map(o=>`<tr>
       <td>${(o.player_name||'').replace(/</g,'&lt;')}</td><td>${o.brand}</td><td>${o.model}</td><td>${o.hand}</td><td>${o.curve||''}</td><td>${o.flex||''}</td><td>${o.quantity||1}</td>
-      <td><input type="checkbox" style="width:auto;" ${o.in_stock?'checked':''} onchange="toggleStickFlag('${o.id}','in_stock')"></td>
+      <td style="text-align:center;">${o.in_stock?'<span title="In stock" style="color:#1f9d55;font-size:20px;font-weight:700;">&#10003;</span>':''}</td>
       <td><input type="checkbox" style="width:auto;" ${o.paid?'checked':''} onchange="toggleStickFlag('${o.id}','paid')">${stickStamp(o.paid_at)}</td>
       <td><input type="checkbox" style="width:auto;" ${o.ordered?'checked':''} ${o.in_stock?'disabled':''} onchange="toggleStickFlag('${o.id}','ordered')">${stickStamp(o.ordered_at)}</td>
       <td><input type="checkbox" style="width:auto;" ${o.delivered?'checked':''} onchange="toggleStickFlag('${o.id}','delivered')">${stickStamp(o.delivered_at)}</td>
@@ -3148,7 +3203,26 @@ function renderSticks(){
       <td><button class="btn ghost small" onclick="deleteStickOrder('${o.id}')">Delete</button></td>
     </tr>`).join('') || '<tr><td colspan="13" class="hint">No stick orders yet.</td></tr>'}
     </tbody></table>
-  </div></div>`;
+  </div></div>
+  <div class="panel" style="margin-top:20px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Stick Inventory (in stock)</h3>
+    <p class="hint" style="margin-top:0;">Add the sticks you have on hand. When someone orders an exact match, it's marked in stock and taken from this count automatically.</p>
+    ${(()=>{ const v=invDraft, vm=STICK_CATALOG[v.model], vc=vm&&v.hand?Object.keys(vm[v.hand]):[], vf=vm&&v.hand&&v.curve?vm[v.hand][v.curve]:[];
+      const op=(arr,cur,ph)=>`<option value="">${ph}</option>`+arr.map(x=>`<option value="${x}" ${cur===x?'selected':''}>${x}</option>`).join('');
+      return `<div class="grid cols-3">
+      <div class="field"><label>Brand</label><select id="invBrand" onchange="invChange('brand')">${op(STICK_BRANDS,v.brand,'Select brand')}</select></div>
+      <div class="field"><label>Stick Type</label><select id="invModel" onchange="invChange('model')" ${v.brand?'':'disabled'}>${op(Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===v.brand),v.model,'Select stick')}</select></div>
+      <div class="field"><label>Hand</label><select id="invHand" onchange="invChange('hand')" ${vm?'':'disabled'}>${op(vm?['LH','RH']:[],v.hand,'Select hand')}</select></div>
+      <div class="field"><label>Curve</label><select id="invCurve" onchange="invChange('curve')" ${vc.length?'':'disabled'}>${op(vc,v.curve,'Select curve')}</select></div>
+      <div class="field"><label>Flex</label><select id="invFlex" onchange="invChange('flex')" ${vf.length?'':'disabled'}>${op(vf,v.flex,'Select flex')}</select></div>
+      <div class="field"><label>Quantity</label><input id="invQty" type="number" min="1" step="1" value="${v.qty||1}" onchange="invDraftSync()"></div>
+      </div><button class="btn purple small" onclick="addStickInventory()">Add to Inventory</button>`; })()}
+    <div class="table-scroll" style="margin-top:14px;"><table><thead><tr><th>Brand</th><th>Stick</th><th>Hand</th><th>Curve</th><th>Flex</th><th>On Hand</th><th></th></tr></thead><tbody>
+    ${stickInventory.map(i=>`<tr><td>${i.brand}</td><td>${i.model}</td><td>${i.hand}</td><td>${i.curve}</td><td>${i.flex}</td>
+      <td><input type="number" min="0" style="width:70px;" value="${i.quantity}" onchange="setStickInventoryQty('${i.id}',this.value)"></td>
+      <td><button class="btn ghost small" onclick="deleteStickInventory('${i.id}')">Remove</button></td></tr>`).join('') || '<tr><td colspan="7" class="hint">No sticks in inventory yet.</td></tr>'}
+    </tbody></table></div>
+  </div>`;
 }
 
 /* ---------- SELL / SWAP ---------- */
