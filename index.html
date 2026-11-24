@@ -1060,6 +1060,7 @@ function adminTabs(){
     {id:'refroster', label:'Referee Roster'},
     {id:'pastgames', label:'Past Games'},
     {id:'merch', label:'Merch'},
+    {id:'sticks', label:'Sticks'},
     {id:'sellswap', label:'Sell/Swap'},
     {id:'openice', label:'Open Ice'},
     {id:'rules', label:'Rules'},
@@ -1119,7 +1120,7 @@ function goTab(id){
   closeTabMenu();
   if(id==='pastgames'){ openPastGames(); return; }
   if(id==='openice'){ openOpenIce(); return; }
-  if(id==='manageleagues'){ openManageLeagues(); return; }
+  if(id==='sticks'){ openSticks(); return; }
   if(id==='developer'){ openDeveloperTab(); return; }
   if(id==='chat'){ openChat(); return; }
   render();
@@ -1230,6 +1231,7 @@ function render(){
   else if(activeTab==='gamelines') main.innerHTML = renderGameLines();
   else if(activeTab==='stats') main.innerHTML = renderStats();
   else if(activeTab==='merch') main.innerHTML = renderMerch();
+  else if(activeTab==='sticks') main.innerHTML = renderSticks();
   else if(activeTab==='postice') main.innerHTML = renderPostIce();
   else if(activeTab==='setstats') main.innerHTML = renderSetStats();
   else if(activeTab==='roster') main.innerHTML = renderRoster();
@@ -3013,6 +3015,92 @@ function addToCart(id){
   const m = merch.find(x=>x.id===id);
   if(m && (m.custom_size||m.custom_number||m.custom_name)){ merchOptions={ id, size:'', number:'', name:'' }; render(); window.scrollTo({top:0,behavior:'smooth'}); return; }
   cart.push({ id, size:'', number:'', name:'' }); showToast('Added to cart'); render();
+}
+
+
+/* ---------- STICK ORDERS (commissioner) ---------- */
+const STICK_BRANDS = ['CCM','Bauer','Warrior','True','Other'];
+const STICK_CATALOG = {"Trigger 10 Pro":{"LH":{"P29":["40","50","55","65","70","75"],"P28":["30","40","55","70","75","85","95"]},"RH":{"P29":["30","40","50","55","65"],"P28":["30","40","55","65","75","85"]}},"Trigger Unleashed Pro":{"LH":{"P29":["30","40","50","65","70","75"],"P28":["40","75","85"]},"RH":{"P29":["30","40","55","65"],"P28":["30","40","55","65","85"]}},"Twitch":{"LH":{"P92":["30","40","50","55","70","87"],"P28":["30","40","50","65","70","77","87"]},"RH":{"P92":["30","50","70","87"],"P28":["30","50","55","87"]}},"Vizion":{"LH":{"P29":["70","75","85"],"P28":["70","75"]},"RH":{"P29":["70","75","85"],"P28":["70","75","85"]}},"Vizion 2":{"LH":{"P29":["50","55","65"],"P28":["55","65","70"]},"RH":{"P29":["55","65","70","75"],"P28":["55","65","70","75","85"]}},"XF Ghost":{"LH":{"P29":["55","65","70","75","85"],"P28":["55","65","70","75","85"]},"RH":{"P29":["55","65","70","75","85"],"P28":["70","75","85"]}},"Proto 2":{"LH":{"P92":["30","40","50","55","65","70","77","87"],"P28":["30","55","65","70","77","87"]},"RH":{"P92":["30","40","50","55","70","87"],"P28":["30","55","70","77","87"]}},"Proto R":{"LH":{"P92":["50","65","70","77","87"],"P28":["40","77","87"]},"RH":{"P28":["87"]}},"Pulse":{"LH":{"P92":["30","40","50","55","65","70","77","87","102"],"P28":["30","40","50","55","65","70","77","87","102"]},"RH":{"P92":["50","55","65","70","77","87"],"P28":["50","55","65","70","77","87","102"]}},"Pulse 2":{"LH":{"P92":["70","77","87"],"P28":["70","77","87"]},"RH":{"P92":["70","77"],"P28":["70","77","87"]}},"Sling 2":{"LH":{"P92":["50","55","65","70","102"],"P28":["70","102"]},"RH":{"P92":["40","50","55","65"]}},"Tracer":{"LH":{"P92":["40","50","55","65","70","102"],"P28":["87","102"],"P88":["70","87"]},"RH":{"P92":["40","50","55","65","77","87"],"P28":["70","77","87"]}},"Trigger 9 Pro":{"LH":{"P28":["75","85"]},"RH":{"P28":["85"]}},"Agent":{"LH":{"P92":["40","65","70"],"P28":["50","65"]},"RH":{"P92":["40","50","65"],"P28":["50","55","87"]}},"Flylite":{"LH":{"P92":["30","40","50","55","65","70","77","87","102"],"P28":["40","50","55","65","77","87","102"]},"RH":{"P92":["30","40","50","55","70","77","87"],"P28":["30","50","55","77","87"]}},"FT7 Pro":{"LH":{"P29":["65","70","75"],"P28":["75"]},"RH":{"P29":["65","75","85"],"P28":["75","85"]}},"FT8 Pro":{"LH":{"P29":["30","40","50","55","65","70"],"P28":["30","40","50","70","75"]},"RH":{"P29":["30","40","50","55","65","75"],"P28":["30","40","50","55","65","87","95"]}},"FT9 Pro":{"LH":{"P29":["30","40","50","55","65","70","75","85"],"P28":["30","40","50","70","75","85"]},"RH":{"P29":["30","40","50","55","65"],"P28":["30","40","50","55","70","75","85"]}},"Fuse":{"LH":{"P92":["30","40","55","70","77","87"],"P28":["30","65","70","77","87"]},"RH":{"P92":["30","40","50","55","70","77","87"],"P28":["30","50","55","70","77","87"]}},"Hyper 2":{"LH":{"P28":["87"]},"RH":{"P28":["55","87"]}}};
+let stickOrders = [];
+let stickDraft = { player_name:'', brand:'', model:'', hand:'', curve:'', flex:'', notes:'' };
+async function openSticks(){
+  const { data, error } = await sb.from('stick_orders').select('*').order('created_at', { ascending:false });
+  if(error){ showToast('Could not load sticks: '+error.message); }
+  stickOrders = data || [];
+  render();
+}
+function stickDraftSync(){
+  const g=id=>document.getElementById(id);
+  ['Player','Brand','Model','Hand','Curve','Flex','Notes'].forEach(k=>{
+    const el=g('stk'+k); if(el) stickDraft[k==='Player'?'player_name':k.toLowerCase()] = el.value;
+  });
+}
+function stickChange(field){
+  stickDraftSync();
+  if(field==='model'){ stickDraft.hand=''; stickDraft.curve=''; stickDraft.flex=''; }
+  if(field==='hand'){ stickDraft.curve=''; stickDraft.flex=''; }
+  if(field==='curve'){ stickDraft.flex=''; }
+  render();
+}
+async function addStickOrder(){
+  stickDraftSync();
+  const d=stickDraft;
+  if(!d.player_name.trim()||!d.brand||!d.model||!d.hand||!d.curve||!d.flex){ showToast('Fill in name, brand, model, hand, curve and flex'); return; }
+  const { error } = await sb.from('stick_orders').insert({ player_name:d.player_name.trim(), brand:d.brand, model:d.model, hand:d.hand, curve:d.curve, flex:d.flex, notes:(d.notes||'').trim()||null });
+  if(error){ showToast('Save failed: '+error.message); return; }
+  stickDraft = { player_name:'', brand:d.brand, model:'', hand:'', curve:'', flex:'', notes:'' };
+  showToast('Stick order added ✓');
+  await openSticks();
+}
+async function toggleStickFlag(id, field){
+  const o = stickOrders.find(x=>x.id===id); if(!o) return;
+  const { error } = await sb.from('stick_orders').update({ [field]: !o[field] }).eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  o[field] = !o[field]; render();
+}
+async function deleteStickOrder(id){
+  if(!confirm('Delete this stick order?')) return;
+  const { error } = await sb.from('stick_orders').delete().eq('id', id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  stickOrders = stickOrders.filter(x=>x.id!==id); render();
+}
+function renderSticks(){
+  const d=stickDraft;
+  const opt=(arr,cur,ph)=>`<option value="">${ph}</option>`+arr.map(v=>`<option value="${v}" ${cur===v?'selected':''}>${v}</option>`).join('');
+  const m = STICK_CATALOG[d.model];
+  const curves = m && d.hand ? Object.keys(m[d.hand]) : [];
+  const flexes = m && d.hand && d.curve ? m[d.hand][d.curve] : [];
+  const outstanding = stickOrders.filter(o=>!o.paid||!o.delivered).length;
+  return `
+  <h2 class="section-title">Stick Orders</h2>
+  <p class="section-sub">${stickOrders.length} order${stickOrders.length===1?'':'s'} · ${outstanding} not yet paid &amp; delivered.</p>
+  <div class="panel" style="margin-bottom:16px;">
+    <h3 style="margin-top:0;font-size:15px;color:var(--teal)">Add Order</h3>
+    <div class="grid cols-3">
+      <div class="field"><label>Player</label>
+        <input id="stkPlayer" list="stkPlayers" value="${(d.player_name||'').replace(/"/g,'&quot;')}" onchange="stickDraftSync()" placeholder="Name">
+        <datalist id="stkPlayers">${(roster||[]).map(p=>`<option value="${(p.name||'').replace(/"/g,'&quot;')}">`).join('')}</datalist></div>
+      <div class="field"><label>Brand</label><select id="stkBrand" onchange="stickChange('brand')">${opt(STICK_BRANDS,d.brand,'Select brand')}</select></div>
+      <div class="field"><label>Stick Type</label><select id="stkModel" onchange="stickChange('model')">${opt(Object.keys(STICK_CATALOG),d.model,'Select stick')}</select></div>
+      <div class="field"><label>Hand</label><select id="stkHand" onchange="stickChange('hand')" ${m?'':'disabled'}>${opt(m?['LH','RH']:[],d.hand,'Select hand')}</select></div>
+      <div class="field"><label>Curve</label><select id="stkCurve" onchange="stickChange('curve')" ${curves.length?'':'disabled'}>${opt(curves,d.curve,'Select curve')}</select></div>
+      <div class="field"><label>Flex</label><select id="stkFlex" onchange="stickChange('flex')" ${flexes.length?'':'disabled'}>${opt(flexes,d.flex,'Select flex')}</select></div>
+    </div>
+    <div class="field"><label>Notes (optional)</label><input id="stkNotes" value="${(d.notes||'').replace(/"/g,'&quot;')}" onchange="stickDraftSync()"></div>
+    <button class="btn purple" onclick="addStickOrder()">Add Order</button>
+  </div>
+  <div class="panel"><div class="table-scroll">
+    <table><thead><tr><th>Player</th><th>Brand</th><th>Stick</th><th>Hand</th><th>Curve</th><th>Flex</th><th>Paid</th><th>Delivered</th><th>Notes</th><th></th></tr></thead>
+    <tbody>
+    ${stickOrders.map(o=>`<tr>
+      <td>${(o.player_name||'').replace(/</g,'&lt;')}</td><td>${o.brand}</td><td>${o.model}</td><td>${o.hand}</td><td>${o.curve||''}</td><td>${o.flex||''}</td>
+      <td><input type="checkbox" style="width:auto;" ${o.paid?'checked':''} onchange="toggleStickFlag('${o.id}','paid')"></td>
+      <td><input type="checkbox" style="width:auto;" ${o.delivered?'checked':''} onchange="toggleStickFlag('${o.id}','delivered')"></td>
+      <td>${(o.notes||'').replace(/</g,'&lt;')}</td>
+      <td><button class="btn ghost small" onclick="deleteStickOrder('${o.id}')">Delete</button></td>
+    </tr>`).join('') || '<tr><td colspan="10" class="hint">No stick orders yet.</td></tr>'}
+    </tbody></table>
+  </div></div>`;
 }
 
 /* ---------- SELL / SWAP ---------- */
