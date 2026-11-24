@@ -3136,13 +3136,13 @@ function renderSticks(){
     <button class="btn purple" onclick="addStickOrder()">Add Order</button>
   </div>
   <div class="panel"><div class="table-scroll">
-    <table><thead><tr><th>Player</th><th>Brand</th><th>Stick</th><th>Hand</th><th>Curve</th><th>Flex</th><th>Qty</th><th>In Stock</th><th>Ordered</th><th>Paid</th><th>Delivered</th><th>Notes</th><th></th></tr></thead>
+    <table><thead><tr><th>Player</th><th>Brand</th><th>Stick</th><th>Hand</th><th>Curve</th><th>Flex</th><th>Qty</th><th>In Stock</th><th>Paid</th><th>Ordered</th><th>Delivered</th><th>Notes</th><th></th></tr></thead>
     <tbody>
     ${stickOrders.map(o=>`<tr>
       <td>${(o.player_name||'').replace(/</g,'&lt;')}</td><td>${o.brand}</td><td>${o.model}</td><td>${o.hand}</td><td>${o.curve||''}</td><td>${o.flex||''}</td><td>${o.quantity||1}</td>
       <td><input type="checkbox" style="width:auto;" ${o.in_stock?'checked':''} onchange="toggleStickFlag('${o.id}','in_stock')"></td>
-      <td><input type="checkbox" style="width:auto;" ${o.ordered?'checked':''} ${o.in_stock?'disabled':''} onchange="toggleStickFlag('${o.id}','ordered')">${stickStamp(o.ordered_at)}</td>
       <td><input type="checkbox" style="width:auto;" ${o.paid?'checked':''} onchange="toggleStickFlag('${o.id}','paid')">${stickStamp(o.paid_at)}</td>
+      <td><input type="checkbox" style="width:auto;" ${o.ordered?'checked':''} ${o.in_stock?'disabled':''} onchange="toggleStickFlag('${o.id}','ordered')">${stickStamp(o.ordered_at)}</td>
       <td><input type="checkbox" style="width:auto;" ${o.delivered?'checked':''} onchange="toggleStickFlag('${o.id}','delivered')">${stickStamp(o.delivered_at)}</td>
       <td>${(o.notes||'').replace(/</g,'&lt;')}</td>
       <td><button class="btn ghost small" onclick="deleteStickOrder('${o.id}')">Delete</button></td>
