@@ -220,7 +220,7 @@ function who(i){ const o=ordersById[i.order_id]||{}; return { name:o.customer_na
 /* ================= RENDER ================= */
 function tabsList(){
   const t=[['shop','Shop'],['cart','Cart']];
-  if(isAdmin()) t.push(['aorders','All Orders'],['toorder','To Order'],['inventory','Inventory'],['customers','Customers']);
+  if(isAdmin()) t.push(['aorders','All Orders'],['toorder','To Order'],['inventory','Inventory'],['customers','Customers'],['admins','Admins']);
   return t;
 }
 function renderTabs(){
@@ -228,14 +228,15 @@ function renderTabs(){
 }
 function goTab(id){
   tab=id;
-  if(['aorders','toorder','inventory','customers'].includes(id)) refreshAdmin().then(render);
+  if(id==='admins') loadAdmins().then(render);
+  else if(['aorders','toorder','inventory','customers'].includes(id)) refreshAdmin().then(render);
   else render();
   window.scrollTo(0,0);
 }
 function render(){
   renderTabs();
   const m=document.getElementById('main');
-  m.innerHTML = ({shop:renderShop,cart:renderCart,aorders:renderAdminOrders,toorder:renderToOrder,inventory:renderInventory,customers:renderCustomers}[tab]||renderShop)();
+  m.innerHTML = ({shop:renderShop,cart:renderCart,aorders:renderAdminOrders,toorder:renderToOrder,inventory:renderInventory,customers:renderCustomers,admins:renderAdmins}[tab]||renderShop)();
 }
 /* ---------- SHOP ---------- */
 function opts(arr,cur,ph){ return `<option value="">${ph}</option>`+arr.map(v=>`<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(v)}</option>`).join(''); }
@@ -542,6 +543,68 @@ function renderCustomers(){
 function copyList(kind){
   const v=customerList().map(c=>kind==='phone'?c.contact_phone:c.contact_email).filter(Boolean).join(kind==='phone'?'\n':', ');
   navigator.clipboard.writeText(v).then(()=>showToast('Copied ✓'),()=>showToast('Copy failed'));
+}
+
+/* ---------- ADMIN: MANAGE ADMIN LOGINS ---------- */
+let adminList=[], allProfiles=[];
+async function loadAdmins(){
+  const { data } = await sb.from('profiles').select('id,name,is_commissioner,is_developer').order('name');
+  allProfiles = data || []; adminList = allProfiles.filter(p=>p.is_commissioner);
+}
+async function createAdminLogin(){
+  const name=document.getElementById('newAdminName').value.trim(), pw=document.getElementById('newAdminPass').value;
+  if(!name||pw.length<6){ showToast('Enter a name and a password of at least 6 characters'); return; }
+  const existing = allProfiles.find(p=>(p.name||'').toLowerCase().replace(/[^a-z0-9]/g,'')===name.toLowerCase().replace(/[^a-z0-9]/g,''));
+  if(existing){ showToast('That name already has a login — use "Make admin" below'); return; }
+  const r = await callAdmin('signup',{ name, password:pw });
+  if(r.error){ showToast('Failed: '+r.error); return; }
+  await loadAdmins();
+  const p = allProfiles.find(x=>(x.name||'')===name);
+  if(!p){ showToast('Account created, but could not find it — try Make admin below'); render(); return; }
+  const { error } = await sb.from('profiles').update({ is_commissioner:true }).eq('id',p.id);
+  if(error){ showToast('Account created but admin access failed: '+error.message); return; }
+  showToast(`Admin login created for ${name} ✓`); await loadAdmins(); render();
+}
+async function setAdmin(id, val){
+  if(id===me.id && !val){ showToast("You can't remove your own admin access"); return; }
+  if(!val && !confirm('Remove admin access for this person?')) return;
+  const { error } = await sb.from('profiles').update({ is_commissioner:val }).eq('id',id);
+  if(error){ showToast('Failed: '+error.message); return; }
+  showToast(val?'Admin access granted ✓':'Admin access removed'); await loadAdmins(); render();
+}
+let adminSearch='';
+async function changeMyPassword(){
+  const a=document.getElementById('pwNew').value, b=document.getElementById('pwNew2').value;
+  if(a.length<6){ showToast('Password must be at least 6 characters'); return; }
+  if(a!==b){ showToast("Passwords don't match"); return; }
+  const { error } = await sb.auth.updateUser({ password:a });
+  if(error){ showToast('Failed: '+error.message); return; }
+  document.getElementById('pwNew').value=''; document.getElementById('pwNew2').value='';
+  showToast('Password changed ✓');
+}
+function renderAdmins(){
+  const q=adminSearch.trim().toLowerCase();
+  const others=allProfiles.filter(p=>!p.is_commissioner && q && (p.name||'').toLowerCase().includes(q)).slice(0,8);
+  return `<h2 class="section-title">Admin Logins</h2>
+  <p class="section-sub">Admins can see every order, set prices, update stock, and download the supplier list.</p>
+  <div class="panel"><h3 style="margin-top:0;">Change my password</h3>
+    <div class="grid cols-3">
+      <div class="field"><label>New password</label><input id="pwNew" type="password" autocomplete="new-password" placeholder="at least 6 characters"></div>
+      <div class="field"><label>Confirm new password</label><input id="pwNew2" type="password" autocomplete="new-password"></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" onclick="changeMyPassword()">Change password</button></div>
+    </div></div>
+  <div class="panel"><h3 style="margin-top:0;">Create a new admin login</h3>
+    <div class="grid cols-3">
+      <div class="field"><label>Name (they sign in with this)</label><input id="newAdminName" placeholder="First Last"></div>
+      <div class="field"><label>Temporary password</label><input id="newAdminPass" type="text" placeholder="at least 6 characters"></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" onclick="createAdminLogin()">Create admin</button></div>
+    </div>
+    <div class="hint">Give them the name and password. They sign in with the Admin button at the top of this page.</div></div>
+  <div class="panel"><h3 style="margin-top:0;">Make an existing player an admin</h3>
+    <div class="field"><label>Search by name</label><input id="adminSearch" value="${esc(adminSearch)}" placeholder="Start typing a name" onchange="adminSearch=this.value;render()"></div>
+    ${others.map(p=>`<div class="row-flex" style="padding:8px 0;border-top:1px solid var(--line);"><span>${esc(p.name)}</span><button class="btn ghost small" onclick="setAdmin('${p.id}',true)">Make admin</button></div>`).join('') || (q?'<div class="hint">No matches.</div>':'')}</div>
+  <div class="panel"><h3 style="margin-top:0;">Current admins (${adminList.length})</h3>
+    ${adminList.map(p=>`<div class="row-flex" style="padding:8px 0;border-top:1px solid var(--line);"><span><strong>${esc(p.name)}</strong>${p.is_developer?' <span class="tag dark">developer</span>':''}${p.id===me.id?' <span class="tag">you</span>':''}</span>${p.id===me.id||p.is_developer?'':`<button class="btn ghost small" onclick="setAdmin('${p.id}',false)">Remove admin</button>`}</div>`).join('')}</div>`;
 }
 
 /* ================= INIT ================= */
