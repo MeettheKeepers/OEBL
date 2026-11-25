@@ -139,6 +139,11 @@ const STICK_BRAND_OF = {'Trigger 10 Pro':'CCM','Trigger Unleashed Pro':'CCM','Tr
   'Twitch':'Bauer','Proto 2':'Bauer','Proto R':'Bauer','Pulse':'Bauer','Pulse 2':'Bauer','Sling 2':'Bauer','Tracer':'Bauer','Agent':'Bauer','Flylite':'Bauer','Fuse':'Bauer','Hyper 2':'Bauer'};
 const STICK_CATALOG = {"Trigger 10 Pro":{"LH":{"P29":["40","50","55","65","70","75"],"P28":["30","40","55","70","75","85","95"]},"RH":{"P29":["30","40","50","55","65"],"P28":["30","40","55","65","75","85"]}},"Trigger Unleashed Pro":{"LH":{"P29":["30","40","50","65","70","75"],"P28":["40","75","85"]},"RH":{"P29":["30","40","55","65"],"P28":["30","40","55","65","85"]}},"Twitch":{"LH":{"P92":["30","40","50","55","70","87"],"P28":["30","40","50","65","70","77","87"]},"RH":{"P92":["30","50","70","87"],"P28":["30","50","55","87"]}},"Vizion":{"LH":{"P29":["70","75","85"],"P28":["70","75"]},"RH":{"P29":["70","75","85"],"P28":["70","75","85"]}},"Vizion 2":{"LH":{"P29":["50","55","65"],"P28":["55","65","70"]},"RH":{"P29":["55","65","70","75"],"P28":["55","65","70","75","85"]}},"XF Ghost":{"LH":{"P29":["55","65","70","75","85"],"P28":["55","65","70","75","85"]},"RH":{"P29":["55","65","70","75","85"],"P28":["70","75","85"]}},"Proto 2":{"LH":{"P92":["30","40","50","55","65","70","77","87"],"P28":["30","55","65","70","77","87"]},"RH":{"P92":["30","40","50","55","70","87"],"P28":["30","55","70","77","87"]}},"Proto R":{"LH":{"P92":["50","65","70","77","87"],"P28":["40","77","87"]},"RH":{"P28":["87"]}},"Pulse":{"LH":{"P92":["30","40","50","55","65","70","77","87","102"],"P28":["30","40","50","55","65","70","77","87","102"]},"RH":{"P92":["50","55","65","70","77","87"],"P28":["50","55","65","70","77","87","102"]}},"Pulse 2":{"LH":{"P92":["70","77","87"],"P28":["70","77","87"]},"RH":{"P92":["70","77"],"P28":["70","77","87"]}},"Sling 2":{"LH":{"P92":["50","55","65","70","102"],"P28":["70","102"]},"RH":{"P92":["40","50","55","65"]}},"Tracer":{"LH":{"P92":["40","50","55","65","70","102"],"P28":["87","102"],"P88":["70","87"]},"RH":{"P92":["40","50","55","65","77","87"],"P28":["70","77","87"]}},"Trigger 9 Pro":{"LH":{"P28":["75","85"]},"RH":{"P28":["85"]}},"Agent":{"LH":{"P92":["40","65","70"],"P28":["50","65"]},"RH":{"P92":["40","50","65"],"P28":["50","55","87"]}},"Flylite":{"LH":{"P92":["30","40","50","55","65","70","77","87","102"],"P28":["40","50","55","65","77","87","102"]},"RH":{"P92":["30","40","50","55","70","77","87"],"P28":["30","50","55","77","87"]}},"FT7 Pro":{"LH":{"P29":["65","70","75"],"P28":["75"]},"RH":{"P29":["65","75","85"],"P28":["75","85"]}},"FT8 Pro":{"LH":{"P29":["30","40","50","55","65","70"],"P28":["30","40","50","70","75"]},"RH":{"P29":["30","40","50","55","65","75"],"P28":["30","40","50","55","65","87","95"]}},"FT9 Pro":{"LH":{"P29":["30","40","50","55","65","70","75","85"],"P28":["30","40","50","70","75","85"]},"RH":{"P29":["30","40","50","55","65"],"P28":["30","40","50","55","70","75","85"]}},"Fuse":{"LH":{"P92":["30","40","55","70","77","87"],"P28":["30","65","70","77","87"]},"RH":{"P92":["30","40","50","55","70","77","87"],"P28":["30","50","55","70","77","87"]}},"Hyper 2":{"LH":{"P28":["87"]},"RH":{"P28":["55","87"]}}};
 
+const PRICES = { Sticks:14000, Jerseys:9000, Gloves:10000 };  // per unit, in cents (the database enforces these too)
+const JERSEY_STYLES = [
+  { id:'Black & White Reversible', img:'jersey-bw-reversible.png' },
+  { id:'Purple & Teal Reversible', img:'jersey-purple-teal-reversible.png' }
+];
 const JERSEY_SIZES = ['S','M','L','XL','2XL','Goalie','YS','YM','YL','YXL','Y Goalie'];
 const GLOVE_BRANDS = ['CCM','Bauer','Other'];
 const GLOVE_SIZES = ['11"','12"','13"','14"','15"'];
@@ -245,7 +250,7 @@ function dchange(field){
 function renderShop(){
   const cats=['Sticks','Jerseys','Gloves'];
   return `<h2 class="section-title">Place an Order</h2>
-  <p class="section-sub">Build your item, add it to the cart, then check out. You'll pay by Interac e-Transfer after placing your order.</p>
+  <p class="section-sub">Sticks ${money(PRICES.Sticks)} · Jerseys ${money(PRICES.Jerseys)} · Gloves ${money(PRICES.Gloves)}. Build your item, add it to the cart, then check out and pay by Interac e-Transfer.</p>
   <div class="cat-tabs">${cats.map(c=>`<button class="${shopCat===c?'on':''}" onclick="setCat('${c}')">${c}</button>`).join('')}</div>
   <div class="panel">${shopCat==='Sticks'?stickBuilder():shopCat==='Jerseys'?jerseyBuilder():gloveBuilder()}</div>`;
 }
@@ -258,7 +263,7 @@ function stickBuilder(){
   const d=draft, m=STICK_CATALOG[d.model];
   const curves = m && d.hand ? Object.keys(m[d.hand]) : [];
   const flexes = m && d.hand && d.curve ? m[d.hand][d.curve] : [];
-  return `<h3 style="margin-top:0;">Hockey Stick</h3><div class="grid cols-3">
+  return `<h3 style="margin-top:0;">Hockey Stick — ${money(PRICES.Sticks)} each</h3><div class="grid cols-3">
     ${dsel('brand','Brand',STICK_BRANDS,'Select brand')}
     ${dsel('model','Stick',Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand),'Select stick',!d.brand)}
     ${dsel('hand','Hand',m?['LH','RH']:[],'Select hand',!m)}
@@ -268,16 +273,23 @@ function stickBuilder(){
     <button class="btn" onclick="addToCart()">Add to Cart</button>`;
 }
 function jerseyBuilder(){
-  return `<h3 style="margin-top:0;">Jersey</h3><div class="grid cols-3">
+  return `<h3 style="margin-top:0;">Reversible Jersey — ${money(PRICES.Jerseys)} each</h3>
+  <div class="field"><label>Style *</label><div class="grid cols-2">
+    ${JERSEY_STYLES.map(st=>`<div onclick="pickStyle('${st.id}')" style="cursor:pointer;border:3px solid ${draft.style===st.id?'#000':'var(--line)'};border-radius:12px;padding:8px;text-align:center;">
+      <img src="${st.img}" alt="${st.id}" style="max-width:100%;border-radius:8px;" onerror="this.style.display='none'">
+      <div style="font-weight:700;margin-top:6px;">${draft.style===st.id?'✓ ':''}${st.id}</div></div>`).join('')}
+  </div></div>
+  <div class="grid cols-3">
     ${dsel('size','Size',JERSEY_SIZES,'Select size')}
-    <div class="field"><label>Custom number</label><input data-d="number" inputmode="numeric" maxlength="3" value="${esc(draft.number||'')}" onchange="dsync()" placeholder="e.g. 17"></div>
+    <div class="field"><label>Custom number</label><input data-d="number" inputmode="numeric" maxlength="3" value="${esc(draft.number||'')}" onchange="dsync()" placeholder="e.g. 89"></div>
     <div class="field"><label>Custom name</label><input data-d="name" maxlength="20" value="${esc(draft.name||'')}" onchange="dsync()" placeholder="Name on back"></div>
     ${qtyField()}</div>
-    <div style="margin-bottom:12px;"><a href="#" onclick="openModal('${SIZE_CHART_URL}');return false;" style="font-weight:700;">View sizing chart</a></div>
-    ${notesField()}<button class="btn" onclick="addToCart()">Add to Cart</button>`;
+  <div style="margin-bottom:12px;"><a href="#" onclick="openModal('${SIZE_CHART_URL}');return false;" style="font-weight:700;">View sizing chart</a></div>
+  ${notesField()}<button class="btn" onclick="addToCart()">Add to Cart</button>`;
 }
+function pickStyle(id){ dsync(); draft.style=id; render(); }
 function gloveBuilder(){
-  return `<h3 style="margin-top:0;">Gloves</h3><div class="grid cols-3">
+  return `<h3 style="margin-top:0;">Gloves — ${money(PRICES.Gloves)} each</h3><div class="grid cols-3">
     ${dsel('brand','Brand',GLOVE_BRANDS,'Select brand')}
     <div class="field"><label>Model</label><input data-d="model" value="${esc(draft.model||'')}" onchange="dsync()" placeholder="e.g. Jetspeed FT6 Pro"></div>
     ${dsel('level','Level',GLOVE_LEVELS,'Select level')}
@@ -292,9 +304,10 @@ function addToCart(){
     if(!d.brand||!d.model||!d.hand||!d.curve||!d.flex){ showToast('Choose brand, stick, hand, curve and flex'); return; }
     item={ category:'Sticks', description:`${d.brand} ${d.model} — ${d.hand} ${d.curve} ${d.flex} flex`, details:{brand:d.brand,model:d.model,hand:d.hand,curve:d.curve,flex:d.flex} };
   } else if(shopCat==='Jerseys'){
+    if(!d.style){ showToast('Choose a jersey style'); return; }
     if(!d.size){ showToast('Choose a size'); return; }
     const num=(d.number||'').trim(), nm=(d.name||'').trim();
-    item={ category:'Jerseys', description:`Jersey — size ${d.size}${num?` · #${num}`:''}${nm?` · ${nm}`:''}`, details:{size:d.size,number:num,name:nm} };
+    item={ category:'Jerseys', description:`${d.style} Jersey — size ${d.size}${num?` · #${num}`:''}${nm?` · ${nm}`:''}`, details:{style:d.style,size:d.size,number:num,name:nm} };
   } else {
     if(!d.brand||!(d.model||'').trim()||!d.level||!d.size){ showToast('Choose brand, model, level and size'); return; }
     const col=(d.color||'').trim();
@@ -303,6 +316,7 @@ function addToCart(){
   item.quantity=qty; item.note=(d.notes||'').trim();
   cart.push(item); saveCart(); draft={}; showToast('Added to cart ✓'); render();
 }
+function cartTotal(){ return cart.reduce((a,c)=>a+PRICES[c.category]*c.quantity,0); }
 function removeFromCart(i){ cart.splice(i,1); saveCart(); render(); }
 
 /* ---------- CART / CHECKOUT ---------- */
@@ -313,17 +327,18 @@ function renderCart(){
     const o=lastOrder;
     return `<div class="panel"><h2 class="section-title">Order placed ✓</h2>
     <p class="section-sub">Thanks ${esc(o.name)} — ${o.count} item${o.count===1?'':'s'} submitted.</p>
-    <p>To start your order, send an <strong>Interac e-Transfer</strong> to:</p>
+    <p>To start your order, send an <strong>Interac e-Transfer of ${money(o.total)}</strong> to:</p>
     <div class="etransfer"><div class="hint" style="color:#b3b3b3;margin:0 0 4px;">E-TRANSFER TO</div><div class="em">${esc(ETRANSFER_EMAIL)}</div></div>
-    <p class="hint">Put your name in the e-Transfer message. We'll confirm your total and send updates by text or email.</p>
+    <p class="hint">Put your name in the e-Transfer message. We'll mark your order paid when the transfer arrives and send updates by text or email.</p>
     <button class="btn small" onclick="lastOrder=null;goTab('shop')">Order something else</button></div>`;
   }
   if(!cart.length) return `<h2 class="section-title">Cart</h2><div class="panel"><div class="empty">Your cart is empty.</div><button class="btn small" onclick="goTab('shop')">Start shopping</button></div>`;
   const units=cart.reduce((a,c)=>a+c.quantity,0), c=contactDraft;
   return `<h2 class="section-title">Cart</h2><p class="section-sub">${units} item${units===1?'':'s'} in your cart.</p>
-  <div class="panel"><div class="table-scroll"><table style="min-width:0"><thead><tr><th>Item</th><th>Qty</th><th></th></tr></thead><tbody>
-  ${cart.map((x,i)=>`<tr><td><span class="tag dark">${x.category}</span> ${esc(x.description)}${x.note?`<div class="hint">Note: ${esc(x.note)}</div>`:''}</td><td>${x.quantity}</td><td><a href="#" style="color:#c0392b" onclick="removeFromCart(${i});return false;">remove</a></td></tr>`).join('')}
-  </tbody></table></div></div>
+  <div class="panel"><div class="table-scroll"><table style="min-width:0"><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th></th></tr></thead><tbody>
+  ${cart.map((x,i)=>`<tr><td><span class="tag dark">${x.category}</span> ${esc(x.description)}${x.note?`<div class="hint">Note: ${esc(x.note)}</div>`:''}</td><td>${x.quantity}</td><td>${money(PRICES[x.category]*x.quantity)}</td><td><a href="#" style="color:#c0392b" onclick="removeFromCart(${i});return false;">remove</a></td></tr>`).join('')}
+  </tbody></table></div>
+  <div style="text-align:right;font-size:18px;font-weight:800;margin-top:10px;">Total: ${money(cartTotal())}</div></div>
   <div class="panel"><h3 style="margin-top:0;">Your info</h3>
     <div class="grid cols-3">
       <div class="field"><label>Name *</label><input id="cName" value="${esc(c.name)}" onchange="csync()" autocomplete="name"></div>
@@ -331,7 +346,7 @@ function renderCart(){
       <div class="field"><label>Email *</label><input id="cEmail" type="email" value="${esc(c.email)}" onchange="csync()" autocomplete="email"></div>
     </div>
     <div class="field"><label>Note for the order (optional)</label><textarea id="orderNote" rows="2"></textarea></div>
-    <div class="etransfer"><strong>How you pay:</strong> after you place the order you'll get an e-Transfer email address to send payment to. We'll confirm your total once pricing is set.</div>
+    <div class="etransfer"><strong>How you pay:</strong> after you place the order you'll get the e-Transfer email address to send your total to.</div>
     <button class="btn" id="placeBtn" onclick="placeOrder()">Place Order</button></div>`;
 }
 async function placeOrder(){
@@ -348,7 +363,7 @@ async function placeOrder(){
   const rows = cart.map(x=>({ order_id:orderId, category:x.category, description:x.description, details:{...x.details, note:x.note||undefined}, quantity:x.quantity }));
   const { error:e2 } = await sb.from('shop_order_items').insert(rows);
   if(e2){ showToast('Order failed: '+e2.message); btn.disabled=false; return; }
-  lastOrder = { name:c.name.trim(), count:cart.length }; cart=[]; saveCart(); render();
+  lastOrder = { name:c.name.trim(), count:cart.length, total:cartTotal() }; cart=[]; saveCart(); render();
 }
 
 /* ---------- ADMIN: ALL ORDERS ---------- */
