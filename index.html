@@ -73,6 +73,10 @@
   .step{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:700;}
   .step.done{background:#e3f6ea;color:#1f7a45;}
   .etransfer{background:#000;color:#fff;border-radius:12px;padding:16px 18px;margin:14px 0;}
+  .name-alert{background:#fff3cd;border:4px solid #000;border-radius:14px;padding:20px 22px;margin:16px 0;text-align:center;}
+  .name-alert .big{font-family:'Anton',sans-serif;font-size:clamp(24px,5vw,38px);letter-spacing:1px;text-transform:uppercase;line-height:1.15;color:#000;}
+  .name-alert .who{display:inline-block;background:#000;color:#fff;border-radius:10px;padding:6px 16px;margin-top:10px;font-size:clamp(20px,4vw,30px);font-weight:800;}
+  .contact-note{background:#e8f4ff;border:2px solid #1a6fc4;border-radius:12px;padding:14px 18px;margin:14px 0;font-size:15px;font-weight:600;}
   .etransfer .em{font-size:18px;font-weight:800;letter-spacing:.3px;word-break:break-all;}
 </style>
 </head>
@@ -144,10 +148,13 @@ const JERSEY_STYLES = [
   { id:'Black & White Reversible', img:'jersey-bw-reversible.png' },
   { id:'Purple & Teal Reversible', img:'jersey-purple-teal-reversible.png' }
 ];
-const JERSEY_SIZES = ['S','M','L','XL','2XL','Goalie','YS','YM','YL','YXL','Y Goalie'];
-const GLOVE_BRANDS = ['CCM','Bauer','Other'];
-const GLOVE_SIZES = ['11"','12"','13"','14"','15"'];
-const GLOVE_LEVELS = ['Junior','Intermediate','Senior'];
+const JERSEY_SIZES = ['S','M','L','XL','XXL','XXXL'];
+// Gloves currently available (all Bauer): model -> colour -> sizes
+const GLOVE_CATALOG = {
+  'Fuse':    { 'All Black':['13"','14"'] },
+  'Flylite': { 'All Black':['11"','12"','13"','14"','15"'] },
+  'Mach':    { 'All Black':['11"','12"','13"','14"','15"'], 'Black / Red':['13"','14"','15"'], 'Black / Blue':['13"','14"','15"'] }
+};
 const SIZE_CHART_URL = 'jersey-size-chart.png';
 
 /* ================= STATE ================= */
@@ -244,8 +251,9 @@ function setCat(c){ shopCat=c; draft={}; render(); }
 function dsync(){ document.querySelectorAll('[data-d]').forEach(el=>{ draft[el.dataset.d]=el.value; }); }
 function dchange(field){
   dsync();
-  const reset = { brand:['model','hand','curve','flex'], model:['hand','curve','flex'], hand:['curve','flex'], curve:['flex'] }[field];
-  if(shopCat==='Sticks' && reset) reset.forEach(k=>draft[k]='');
+  const resets = shopCat==='Sticks' ? { brand:['model','hand','curve','flex'], model:['hand','curve','flex'], hand:['curve','flex'], curve:['flex'] }
+               : shopCat==='Gloves' ? { model:['color','size'], color:['size'] } : {};
+  if(resets[field]) resets[field].forEach(k=>draft[k]='');
   render();
 }
 function renderShop(){
@@ -290,12 +298,11 @@ function jerseyBuilder(){
 }
 function pickStyle(id){ dsync(); draft.style=id; render(); }
 function gloveBuilder(){
-  return `<h3 style="margin-top:0;">Gloves — ${money(PRICES.Gloves)} each</h3><div class="grid cols-3">
-    ${dsel('brand','Brand',GLOVE_BRANDS,'Select brand')}
-    <div class="field"><label>Model</label><input data-d="model" value="${esc(draft.model||'')}" onchange="dsync()" placeholder="e.g. Jetspeed FT6 Pro"></div>
-    ${dsel('level','Level',GLOVE_LEVELS,'Select level')}
-    ${dsel('size','Size',GLOVE_SIZES,'Select size')}
-    <div class="field"><label>Colour</label><input data-d="color" value="${esc(draft.color||'')}" onchange="dsync()" placeholder="e.g. Black/White"></div>
+  const d=draft, colors = d.model ? Object.keys(GLOVE_CATALOG[d.model]) : [], sizes = d.model && d.color ? GLOVE_CATALOG[d.model][d.color] : [];
+  return `<h3 style="margin-top:0;">Bauer Gloves — ${money(PRICES.Gloves)} each</h3><div class="grid cols-3">
+    ${dsel('model','Model',Object.keys(GLOVE_CATALOG),'Select model')}
+    ${dsel('color','Colour',colors,'Select colour',!colors.length)}
+    ${dsel('size','Size',sizes,'Select size',!sizes.length)}
     ${qtyField()}</div>${notesField()}
     <button class="btn" onclick="addToCart()">Add to Cart</button>`;
 }
@@ -310,9 +317,8 @@ function addToCart(){
     const num=(d.number||'').trim(), nm=(d.name||'').trim();
     item={ category:'Jerseys', description:`${d.style} Jersey — size ${d.size}${num?` · #${num}`:''}${nm?` · ${nm}`:''}`, details:{style:d.style,size:d.size,number:num,name:nm} };
   } else {
-    if(!d.brand||!(d.model||'').trim()||!d.level||!d.size){ showToast('Choose brand, model, level and size'); return; }
-    const col=(d.color||'').trim();
-    item={ category:'Gloves', description:`${d.brand} ${d.model.trim()} gloves — ${d.level} ${d.size}${col?` · ${col}`:''}`, details:{brand:d.brand,model:d.model.trim(),level:d.level,size:d.size,color:col} };
+    if(!d.model||!d.color||!d.size){ showToast('Choose model, colour and size'); return; }
+    item={ category:'Gloves', description:`Bauer ${d.model} gloves — ${d.color} ${d.size}`, details:{brand:'Bauer',model:d.model,color:d.color,size:d.size} };
   }
   item.quantity=qty; item.note=(d.notes||'').trim();
   cart.push(item); saveCart(); draft={}; showToast('Added to cart ✓'); render();
@@ -327,10 +333,12 @@ function renderCart(){
   if(lastOrder){
     const o=lastOrder;
     return `<div class="panel"><h2 class="section-title">Order placed ✓</h2>
-    <p class="section-sub">Thanks ${esc(o.name)} — ${o.count} item${o.count===1?'':'s'} submitted.</p>
-    <p>To start your order, send an <strong>Interac e-Transfer of ${money(o.total)}</strong> to:</p>
+    <p class="section-sub">Thanks ${esc(o.name)} — ${o.count} item${o.count===1?'':'s'} submitted. Your order isn't started until your e-Transfer is received.</p>
+    <p style="font-size:17px;">Send an <strong>Interac e-Transfer of ${money(o.total)}</strong> to:</p>
     <div class="etransfer"><div class="hint" style="color:#b3b3b3;margin:0 0 4px;">E-TRANSFER TO</div><div class="em">${esc(ETRANSFER_EMAIL)}</div></div>
-    <p class="hint">Put your name in the e-Transfer message. We'll mark your order paid when the transfer arrives and send updates by text or email.</p>
+    <div class="name-alert"><div class="big">&#9888; You MUST put your FULL NAME in the e-Transfer message</div><div class="who">${esc(o.name)}</div>
+      <div style="margin-top:10px;font-weight:700;">We match payments to orders by name — without it we can't find your payment.</div></div>
+    <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
     <button class="btn small" onclick="lastOrder=null;goTab('shop')">Order something else</button></div>`;
   }
   if(!cart.length) return `<h2 class="section-title">Cart</h2><div class="panel"><div class="empty">Your cart is empty.</div><button class="btn small" onclick="goTab('shop')">Start shopping</button></div>`;
@@ -348,6 +356,8 @@ function renderCart(){
     </div>
     <div class="field"><label>Note for the order (optional)</label><textarea id="orderNote" rows="2"></textarea></div>
     <div class="etransfer"><strong>How you pay:</strong> after you place the order you'll get the e-Transfer email address to send your total to.</div>
+    <div class="name-alert"><div class="big">&#9888; Put your FULL NAME in the e-Transfer message</div><div style="margin-top:8px;font-weight:700;">We match payments to orders by name.</div></div>
+    <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
     <button class="btn" id="placeBtn" onclick="placeOrder()">Place Order</button></div>`;
 }
 async function placeOrder(){
