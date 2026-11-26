@@ -157,6 +157,32 @@ const GLOVE_CATALOG = {
 };
 const SIZE_CHART_URL = 'jersey-size-chart.png';
 
+/* ================= DELIVERY ESTIMATES ================= */
+const LEAD_MIN_BD = 10, LEAD_MAX_BD = 12;   // supplier lead time in business days (weekends skipped, holidays not)
+let nextOrderDate = '';                    // 'YYYY-MM-DD' — the date admin will next send an order to the supplier
+function addBusinessDays(d, n){ const x=new Date(d); let left=n; while(left>0){ x.setDate(x.getDate()+1); const w=x.getDay(); if(w!==0&&w!==6) left--; } return x; }
+function fmtDay(d){ return d.toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'}); }
+function etaRange(base){ const b=new Date(base); return fmtDay(addBusinessDays(b,LEAD_MIN_BD))+' – '+fmtDay(addBusinessDays(b,LEAD_MAX_BD)); }
+function nextOrderLocal(){ return nextOrderDate ? new Date(nextOrderDate+'T12:00:00') : null; }
+// text for a single item (sticks only): estimated delivery, or null if none to show
+function itemEta(i){
+  if(i.category!=='Sticks' || i.delivered) return null;
+  if(i.in_stock) return 'In stock — ready for pickup/delivery';
+  if(i.ordered && i.ordered_at) return 'Estimated delivery: '+etaRange(i.ordered_at);
+  const n=nextOrderLocal();
+  return n ? 'Next supplier order: '+fmtDay(n)+' · Estimated delivery: '+etaRange(n) : 'Estimated delivery: 10–12 business days after we place the supplier order';
+}
+function cartEtaText(items){
+  if(!items.some(x=>x.category==='Sticks')) return '';
+  const n=nextOrderLocal();
+  return n ? `Sticks: we place our next supplier order on ${fmtDay(n)}. Estimated delivery ${etaRange(n)} (10–12 business days after ordering).`
+           : 'Sticks: estimated delivery is 10–12 business days after we place the supplier order.';
+}
+async function loadSettings(){
+  const { data } = await sb.from('shop_settings').select('*').eq('key','next_order_date').maybeSingle();
+  nextOrderDate = (data && data.value) || '';
+}
+
 /* ================= STATE ================= */
 let session=null, me=null, authMode='signin';
 let tab='shop', shopCat='Sticks';
@@ -221,12 +247,13 @@ async function refreshAdmin(){
     sb.from('stick_inventory').select('*').order('brand').order('model')
   ]);
   adminItems = it.data || []; stickInventory = inv.data || [];
+  await loadSettings();
   ordersById = {}; (ord.data||[]).forEach(o=>ordersById[o.id]=o);
 }
 function who(i){ const o=ordersById[i.order_id]||{}; return { name:o.customer_name||'?', phone:o.customer_phone||'', email:o.customer_email||'' }; }
 /* ================= RENDER ================= */
 function tabsList(){
-  const t=[['shop','Shop'],['cart','Cart']];
+  const t=[['shop','Shop'],['cart','Cart'],['lookup','Find My Order']];
   if(isAdmin()) t.push(['aorders','All Orders'],['toorder','To Order'],['inventory','Inventory'],['customers','Customers'],['admins','Admins']);
   return t;
 }
@@ -243,7 +270,7 @@ function goTab(id){
 function render(){
   renderTabs();
   const m=document.getElementById('main');
-  m.innerHTML = ({shop:renderShop,cart:renderCart,aorders:renderAdminOrders,toorder:renderToOrder,inventory:renderInventory,customers:renderCustomers,admins:renderAdmins}[tab]||renderShop)();
+  m.innerHTML = ({shop:renderShop,cart:renderCart,aorders:renderAdminOrders,toorder:renderToOrder,inventory:renderInventory,customers:renderCustomers,admins:renderAdmins,lookup:renderLookup}[tab]||renderShop)();
 }
 /* ---------- SHOP ---------- */
 function opts(arr,cur,ph){ return `<option value="">${ph}</option>`+arr.map(v=>`<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(v)}</option>`).join(''); }
@@ -339,6 +366,7 @@ function renderCart(){
     <div class="name-alert"><div class="big">&#9888; You MUST put your FULL NAME in the e-Transfer message</div><div class="who">${esc(o.name)}</div>
       <div style="margin-top:10px;font-weight:700;">We match payments to orders by name — without it we can't find your payment.</div></div>
     <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
+    ${o.eta?`<div class="contact-note" style="background:#f1f8e9;border-color:#5a9a2f;">&#128666; ${esc(o.eta)}</div>`:''}
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn small" onclick="downloadReceipt()">&#11015; Download order sheet (PDF)</button>
       <button class="btn ghost small" onclick="lastOrder=null;goTab('shop')">Order something else</button></div></div>`;
@@ -360,6 +388,7 @@ function renderCart(){
     <div class="etransfer"><strong>How you pay:</strong> after you place the order you'll get the e-Transfer email address to send your total to.</div>
     <div class="name-alert"><div class="big">&#9888; Put your FULL NAME in the e-Transfer message</div><div style="margin-top:8px;font-weight:700;">We match payments to orders by name.</div></div>
     <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
+    ${cartEtaText(cart)?`<div class="contact-note" style="background:#f1f8e9;border-color:#5a9a2f;">&#128666; ${esc(cartEtaText(cart))}</div>`:''}
     <button class="btn" id="placeBtn" onclick="placeOrder()">Place Order</button></div>`;
 }
 async function placeOrder(){
@@ -376,7 +405,51 @@ async function placeOrder(){
   const rows = cart.map(x=>({ order_id:orderId, category:x.category, description:x.description, details:{...x.details, note:x.note||undefined}, quantity:x.quantity }));
   const { error:e2 } = await sb.from('shop_order_items').insert(rows);
   if(e2){ showToast('Order failed: '+e2.message); btn.disabled=false; return; }
-  lastOrder = { id:orderId, name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim(), note:note||'', date:new Date(), count:cart.length, total:cartTotal(), items:cart.map(x=>({...x, price:PRICES[x.category]*x.quantity})) }; cart=[]; saveCart(); render();
+  lastOrder = { eta:cartEtaText(cart), id:orderId, name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim(), note:note||'', date:new Date(), count:cart.length, total:cartTotal(), items:cart.map(x=>({...x, price:PRICES[x.category]*x.quantity})) }; cart=[]; saveCart(); render();
+}
+
+/* ---------- FIND MY ORDER (no account) ---------- */
+let lookupForm={name:'',phone:'',email:''}, lookupResults=null, lookupBusy=false;
+function lsync(){ ['Name','Phone','Email'].forEach(k=>{ const el=document.getElementById('l'+k); if(el) lookupForm[k.toLowerCase()]=el.value; }); }
+async function doLookup(){
+  lsync(); const f=lookupForm;
+  if(f.name.trim().length<2||f.phone.replace(/\D/g,'').length<7||!/^\S+@\S+\.\S+$/.test(f.email.trim())){ showToast('Enter the same name, phone and email you used on your order'); return; }
+  lookupBusy=true; render();
+  const { data, error } = await sb.rpc('lookup_shop_orders',{ p_name:f.name, p_phone:f.phone, p_email:f.email });
+  lookupBusy=false;
+  if(error){ showToast('Lookup failed: '+error.message); render(); return; }
+  lookupResults = data || []; render();
+}
+function statusText(i){
+  if(i.delivered) return 'Delivered';
+  if(i.ordered) return 'Ordered from supplier';
+  if(i.in_stock && i.paid) return 'Paid — in stock';
+  if(i.in_stock) return 'In stock — awaiting payment';
+  if(i.paid) return 'Payment received';
+  return 'Awaiting e-Transfer';
+}
+function stepsHTML(i){
+  const st=[['Placed',true],['Paid',i.paid],[i.in_stock?'In stock':'Ordered',i.in_stock||i.ordered],['Delivered',i.delivered]];
+  return `<div class="steps">${st.map(x=>`<span class="step ${x[1]?'done':''}">${x[1]?'✓ ':''}${x[0]}</span>`).join('')}</div>`;
+}
+function renderLookup(){
+  const f=lookupForm;
+  const res=lookupResults;
+  const total = res ? res.reduce((a,i)=>a+(i.price_cents||0),0) : 0;
+  return `<h2 class="section-title">Find My Order</h2>
+  <p class="section-sub">Enter the same name, phone number and email you used when you ordered.</p>
+  <div class="panel"><div class="grid cols-3">
+    <div class="field"><label>Full name</label><input id="lName" value="${esc(f.name)}" onchange="lsync()" autocomplete="name"></div>
+    <div class="field"><label>Phone</label><input id="lPhone" type="tel" value="${esc(f.phone)}" onchange="lsync()" autocomplete="tel"></div>
+    <div class="field"><label>Email</label><input id="lEmail" type="email" value="${esc(f.email)}" onchange="lsync()" autocomplete="email"></div>
+  </div><button class="btn small" onclick="doLookup()" ${lookupBusy?'disabled':''}>${lookupBusy?'Searching…':'Find my orders'}</button></div>
+  ${res===null?'':(res.length? `<p class="section-sub">${res.length} item${res.length===1?'':'s'} · Total ${money(total)}</p>
+    ${res.map(i=>{ const eta=itemEta(i); return `<div class="panel" style="padding:16px;">
+      <div class="row-flex"><div><span class="tag dark">${esc(i.category)}</span> <strong>${esc(i.description)}</strong> <span class="hint">× ${i.quantity}</span>
+        <div class="hint">Ordered ${fmtDay(new Date(i.order_date))}</div></div>
+        <div style="text-align:right;"><strong>${i.price_cents==null?'Price pending':money(i.price_cents)}</strong><div class="hint" style="margin:0;">${statusText(i)}</div></div></div>
+      ${stepsHTML(i)}${eta?`<div class="hint" style="margin-top:8px;font-weight:700;color:#2e6b12;">&#128666; ${esc(eta)}</div>`:''}</div>`; }).join('')}`
+    : `<div class="panel"><div class="empty">No orders found for those details. Check the spelling and use exactly what you entered when ordering.</div></div>`)}`;
 }
 
 /* ---------- ORDER SHEET (PDF) ---------- */
@@ -448,6 +521,7 @@ async function downloadReceipt(){
     doc.setFillColor(0,0,0); doc.roundedRect(M+16,y+100,W-2*M-32,30,6,6,'F');
     doc.setTextColor(255,255,255); doc.setFontSize(16); doc.text(o.name.toUpperCase(), W/2, y+120, { align:'center' });
     y+=168;
+    if(o.eta){ doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(40,100,20); const el=doc.splitTextToSize('Estimated delivery: '+o.eta, W-2*M); doc.text(el, M, y); y+=el.length*13+8; }
     doc.setTextColor(60,60,60); doc.setFont('helvetica','normal'); doc.setFontSize(10);
     doc.text(doc.splitTextToSize('We match payments to orders by name. Your order starts once your e-Transfer is received, and we will contact you by email and text as soon as your order comes in.', W-2*M), M, y);
     // footer
@@ -519,7 +593,7 @@ function renderAdminOrders(){
     <select id="fStatus" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;" onchange="setFilter()">
       ${[['all','All'],['open','Not delivered'],['unpaid','Unpaid'],['notordered','Not ordered / not in stock'],['undelivered','Undelivered']].map(([v,l])=>`<option value="${v}" ${filterStatus===v?'selected':''}>${l}</option>`).join('')}
     </select></div>
-  <div class="panel"><div class="table-scroll"><table><thead><tr><th>Customer</th><th>Item</th><th>Qty</th><th>Price ($)</th><th>Stock</th><th>Paid</th><th>Ordered</th><th>Delivered</th><th></th></tr></thead><tbody>
+  <div class="panel"><div class="table-scroll"><table><thead><tr><th>Customer</th><th>Item</th><th>Qty</th><th>Price ($)</th><th>Stock</th><th>Paid</th><th>Ordered</th><th>Est. delivery</th><th>Delivered</th><th></th></tr></thead><tbody>
   ${list.map(i=>{ const c=who(i); const inv=stickInvFor(i);
     const stockCell = i.in_stock ? `<a href="#" title="In stock — click to release" style="color:#1f9d55;font-size:20px;font-weight:700;text-decoration:none;" onclick="releaseStock('${i.id}');return false;">&#10003;</a>`
       : (inv && inv.quantity>=i.quantity ? `<button class="btn ghost small" onclick="useStock('${i.id}')">Use stock (${inv.quantity})</button>` : '');
@@ -530,18 +604,37 @@ function renderAdminOrders(){
       <td style="text-align:center;">${stockCell}</td>
       <td><input type="checkbox" ${i.paid?'checked':''} onchange="toggleFlag('${i.id}','paid')">${stamp(i.paid_at)}</td>
       <td><input type="checkbox" ${i.ordered?'checked':''} ${i.in_stock?'disabled':''} onchange="toggleFlag('${i.id}','ordered')">${stamp(i.ordered_at)}</td>
+      <td style="font-size:12px;">${(()=>{ if(i.category!=='Sticks'||i.delivered||i.in_stock) return '—'; const b=i.ordered&&i.ordered_at?new Date(i.ordered_at):nextOrderLocal(); return b?etaRange(b)+(i.ordered?'':'<div class="hint" style="margin:0;font-size:11px;">if ordered '+fmtDay(b)+'</div>'):'set next order date'; })()}</td>
       <td><input type="checkbox" ${i.delivered?'checked':''} onchange="toggleFlag('${i.id}','delivered')">${stamp(i.delivered_at)}</td>
-      <td><button class="btn ghost small" onclick="deleteItem('${i.id}')">Delete</button></td></tr>`; }).join('') || '<tr><td colspan="9" class="hint">No items.</td></tr>'}
+      <td><button class="btn ghost small" onclick="deleteItem('${i.id}')">Delete</button></td></tr>`; }).join('') || '<tr><td colspan="10" class="hint">No items.</td></tr>'}
   </tbody></table></div></div>`;
 }
 
 /* ---------- ADMIN: TO ORDER (Excel) ---------- */
+async function saveNextOrderDate(){
+  const v=document.getElementById('nextOrderInput').value;
+  if(!v){ showToast('Pick a date'); return; }
+  const { error } = await sb.from('shop_settings').upsert({ key:'next_order_date', value:v, updated_at:new Date().toISOString() });
+  if(error){ showToast('Failed: '+error.message); return; }
+  nextOrderDate=v; showToast('Next order date saved ✓'); render();
+}
+async function clearNextOrderDate(){
+  const { error } = await sb.from('shop_settings').delete().eq('key','next_order_date');
+  if(error){ showToast('Failed: '+error.message); return; }
+  nextOrderDate=''; render();
+}
 function needsOrdering(){ return adminItems.filter(i=>!i.in_stock && !i.ordered); }
 function renderToOrder(){
   const list=needsOrdering(), units=list.reduce((a,i)=>a+i.quantity,0);
   const groups=groupForSupplier(list);
   return `<h2 class="section-title">To Order</h2>
   <p class="section-sub">${units} item${units===1?'':'s'} not in stock and not yet ordered. Items marked ordered or in stock never appear here.</p>
+  <div class="panel" style="padding:16px;"><h3 style="margin-top:0;">Next supplier order date</h3>
+    <div class="row-flex" style="justify-content:flex-start;gap:14px;">
+      <input id="nextOrderInput" type="date" value="${esc(nextOrderDate)}" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;">
+      <button class="btn small" onclick="saveNextOrderDate()">Save date</button>
+      ${nextOrderDate?`<button class="btn ghost small" onclick="clearNextOrderDate()">Clear</button>`:''}</div>
+    <div class="hint">${nextOrderDate?`Estimated delivery for sticks ordered then: <strong>${etaRange(nextOrderLocal())}</strong> (${LEAD_MIN_BD}–${LEAD_MAX_BD} business days). Customers see this on the cart, confirmation, receipt and Find My Order.`:'Not set. Customers see "10–12 business days after we place the supplier order" until you set a date.'}</div></div>
   <button class="btn small" style="margin-bottom:14px;" onclick="downloadOrderList()" ${list.length?'':'disabled'}>Download supplier list (Excel)</button>
   <div class="panel"><div class="table-scroll"><table style="min-width:0"><thead><tr><th>Category</th><th>Item</th><th>Qty</th><th>For</th></tr></thead><tbody>
   ${groups.map(g=>`<tr><td>${g.category}</td><td>${esc(g.description)}</td><td>${g.qty}</td><td>${esc(g.names.join(', '))}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">Nothing to order.</td></tr>'}
@@ -730,6 +823,7 @@ function renderAdmins(){
 /* ================= INIT ================= */
 (async function init(){
   loadCart(); render();
+  loadSettings().then(render);
   const { data } = await sb.auth.getSession();
   if(data.session){ await enterApp(data.session, true); }
 })();
