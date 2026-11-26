@@ -56,6 +56,13 @@
   .cat-tabs button{padding:12px 22px;border-radius:12px;border:2px solid var(--line);background:#fff;font-weight:700;font-size:14px;}
   .cat-tabs button.on{background:#000;border-color:#000;color:#fff;}
   .cat-tabs button.soon{cursor:not-allowed;color:#8a8f96;background:#f4f6f8;display:inline-flex;align-items:center;gap:10px;}
+  .cs{position:relative;}
+  .cs-btn{width:100%;text-align:left;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:14px;font-family:inherit;color:var(--text);display:flex;justify-content:space-between;align-items:center;}
+  .cs-btn:disabled{opacity:.5;cursor:not-allowed;}
+  .cs-list{position:absolute;z-index:40;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.2);max-height:340px;overflow:auto;}
+  .cs-item{display:block;width:100%;text-align:left;padding:12px 14px;border:none;background:#fff;font-size:14px;font-family:inherit;color:var(--text);}
+  .cs-item:hover{background:#f4f6f8;} .cs-item.sel{font-weight:800;}
+  .cs-item.soon{background:#ffd43b;color:#4a3700;font-weight:800;cursor:not-allowed;} .cs-item.soon:hover{background:#ffd43b;}
   .soon-tag{background:#ffd43b;color:#5c4400;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;}
   .chip{display:inline-block;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);font-weight:600;font-size:13px;color:var(--muted);margin:0 6px 6px 0;cursor:pointer;}
   .chip.on{background:#000;border-color:#000;color:#fff;}
@@ -286,7 +293,7 @@ function render(){
 }
 /* ---------- SHOP ---------- */
 function opts(arr,cur,ph){ return `<option value="">${ph}</option>`+arr.map(v=>`<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(v)}</option>`).join(''); }
-function setCat(c){ shopCat=c; draft={}; render(); }
+function setCat(c){ shopCat=c; draft={}; stickMenuOpen=false; render(); }
 function dsync(){ document.querySelectorAll('[data-d]').forEach(el=>{ draft[el.dataset.d]=el.value; }); }
 function dchange(field){
   dsync();
@@ -308,13 +315,21 @@ function dsel(key,label,optionsArr,ph,disabled){
 }
 function qtyField(){ return `<div class="field"><label>Quantity</label><input data-d="qty" type="number" min="1" step="1" value="${esc(draft.qty||1)}" onchange="dsync()"></div>`; }
 function notesField(){ return `<div class="field"><label>Notes (optional)</label><input data-d="notes" value="${esc(draft.notes||'')}" onchange="dsync()" placeholder="Anything we should know"></div>`; }
+let stickMenuOpen=false;
+function toggleStickMenu(e){ e.stopPropagation(); stickMenuOpen=!stickMenuOpen; dsync(); render(); }
+function pickStick(k){ stickMenuOpen=false; const h=document.querySelector('input[data-d="model"]'); if(h) h.value=k; draft.model=k; dchange('model'); }
+document.addEventListener('click',e=>{ if(stickMenuOpen && !e.target.closest('.cs')){ stickMenuOpen=false; render(); } });
 function stickBuilder(){
   const d=draft, m=STICK_CATALOG[d.model];
   const curves = m && d.hand ? Object.keys(m[d.hand]) : [];
   const flexes = m && d.hand && d.curve ? m[d.hand][d.curve] : [];
   return `<h3 style="margin-top:0;">Hockey Stick — ${money(PRICES.Sticks)} each</h3><div class="grid cols-3">
     ${dsel('brand','Brand',STICK_BRANDS,'Select brand')}
-    <div class="field"><label>Stick</label><select data-d="model" onchange="dchange('model')" ${d.brand?'':'disabled'}>${opts(Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand),d.model,'Select stick')}${d.brand==='CCM'?'<option disabled style="background:#ffd43b;color:#5c4400;font-weight:700;">FT10 — COMING SOON</option>':''}</select></div>
+    <div class="field"><label>Stick</label><div class="cs">
+      <input type="hidden" data-d="model" value="${esc(d.model||'')}">
+      <button type="button" class="cs-btn" ${d.brand?'':'disabled'} onclick="toggleStickMenu(event)"><span>${esc(d.model||'Select stick')}</span><span>&#9662;</span></button>
+      ${stickMenuOpen?`<div class="cs-list">${Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand).map(k=>`<button type="button" class="cs-item ${d.model===k?'sel':''}" onclick="pickStick('${k}')">${esc(k)}</button>`).join('')}${d.brand==='CCM'?'<div class="cs-item soon">FT10 — COMING SOON</div>':''}</div>`:''}
+    </div></div>
     ${dsel('hand','Hand',m?['LH','RH']:[],'Select hand',!m)}
     ${dsel('curve','Curve',curves,'Select curve',!curves.length)}
     ${dsel('flex','Flex',flexes,'Select flex',!flexes.length)}
