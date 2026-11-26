@@ -314,8 +314,7 @@ function stickBuilder(){
   const flexes = m && d.hand && d.curve ? m[d.hand][d.curve] : [];
   return `<h3 style="margin-top:0;">Hockey Stick — ${money(PRICES.Sticks)} each</h3><div class="grid cols-3">
     ${dsel('brand','Brand',STICK_BRANDS,'Select brand')}
-    <div class="field"><label>Stick</label><select data-d="model" onchange="dchange('model')" ${d.brand?'':'disabled'}>${opts(Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand),d.model,'Select stick')}${d.brand==='CCM'?'<option disabled>FT10 — Coming soon</option>':''}</select>
-      ${d.brand==='CCM'?'<div style="margin-top:6px;"><span class="soon-tag">FT10 &middot; Coming soon</span></div>':''}</div>
+    <div class="field"><label>Stick</label><select data-d="model" onchange="dchange('model')" ${d.brand?'':'disabled'}>${opts(Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand),d.model,'Select stick')}${d.brand==='CCM'?'<option disabled style="background:#ffd43b;color:#5c4400;font-weight:700;">FT10 — COMING SOON</option>':''}</select></div>
     ${dsel('hand','Hand',m?['LH','RH']:[],'Select hand',!m)}
     ${dsel('curve','Curve',curves,'Select curve',!curves.length)}
     ${dsel('flex','Flex',flexes,'Select flex',!flexes.length)}
