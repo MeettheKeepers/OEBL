@@ -75,7 +75,7 @@
   .etransfer{background:#000;color:#fff;border-radius:12px;padding:16px 18px;margin:14px 0;}
   .name-alert{background:#ffe3e3;border:4px solid #c0392b;border-radius:14px;padding:20px 22px;margin:16px 0;text-align:center;}
   .name-alert .big{font-family:'Anton',sans-serif;font-size:clamp(24px,5vw,38px);letter-spacing:1px;text-transform:uppercase;line-height:1.15;color:#a80000;}
-  .name-alert .deadline{margin-top:12px;padding-top:12px;border-top:3px solid #c0392b;font-weight:800;font-size:clamp(16px,3vw,21px);color:#a80000;text-transform:uppercase;}
+  .name-alert .deadline{margin-top:12px;padding-top:12px;border-top:3px solid #c0392b;font-weight:700;font-size:clamp(15px,2.6vw,18px);color:#a80000;}
   .name-alert .who{display:inline-block;background:#a80000;color:#fff;border-radius:10px;padding:6px 16px;margin-top:10px;font-size:clamp(20px,4vw,30px);font-weight:800;}
   .contact-note{background:#e8f4ff;border:2px solid #1a6fc4;border-radius:12px;padding:14px 18px;margin:14px 0;font-size:15px;font-weight:600;}
   .etransfer .em{font-size:18px;font-weight:800;letter-spacing:.3px;word-break:break-all;}
@@ -375,7 +375,7 @@ function renderCart(){
     <div class="etransfer"><div class="hint" style="color:#b3b3b3;margin:0 0 4px;">E-TRANSFER TO</div><div class="em">${esc(ETRANSFER_EMAIL)}</div></div>
     <div class="name-alert"><div class="big">&#9888; You MUST put your FULL NAME in the e-Transfer message</div><div class="who">${esc(o.name)}</div>
       <div style="margin-top:10px;font-weight:700;">We match payments to orders by name — without it we can't find your payment.</div>
-      <div class="deadline">Pay within ${PAY_DAYS} business days — by ${fmtDeadline(o.deadline)} — or your order will be removed.</div></div>
+      <div class="deadline">Please send your e-Transfer within 24 hours to confirm your order.</div></div>
     <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
     ${o.eta?`<div class="contact-note" style="background:#f1f8e9;border-color:#5a9a2f;">&#128666; ${esc(o.eta).replace(/\n/g,'<br>')}</div>`:''}
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -398,7 +398,7 @@ function renderCart(){
     <div class="field"><label>Note for the order (optional)</label><textarea id="orderNote" rows="2"></textarea></div>
     <div class="etransfer"><strong>How you pay:</strong> after you place the order you'll get the e-Transfer email address to send your total to.</div>
     <div class="name-alert"><div class="big">&#9888; Put your FULL NAME in the e-Transfer message</div><div style="margin-top:8px;font-weight:700;">We match payments to orders by name.</div>
-      <div class="deadline">You have ${PAY_DAYS} business days to send your e-Transfer or your order will be removed.</div></div>
+      <div class="deadline">Please send your e-Transfer within 24 hours to confirm your order.</div></div>
     <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
     ${cartEtaText(cart)?`<div class="contact-note" style="background:#f1f8e9;border-color:#5a9a2f;">&#128666; ${esc(cartEtaText(cart)).replace(/\n/g,'<br>')}</div>`:''}
     <button class="btn" id="placeBtn" onclick="placeOrder()">Place Order</button></div>`;
@@ -460,7 +460,7 @@ function renderLookup(){
       <div class="row-flex"><div><span class="tag dark">${esc(i.category)}</span> <strong>${esc(i.description)}</strong> <span class="hint">× ${i.quantity}</span>
         <div class="hint">Ordered ${fmtDay(new Date(i.order_date))}</div></div>
         <div style="text-align:right;"><strong>${i.price_cents==null?'Price pending':money(i.price_cents)}</strong><div class="hint" style="margin:0;">${statusText(i)}</div></div></div>
-      ${stepsHTML(i)}${(!i.paid&&i.pay_deadline)?`<div class="hint" style="margin-top:8px;font-weight:700;color:#a80000;">&#9888; ${new Date(i.pay_deadline)<new Date()?'Payment is overdue — contact us right away or your order may be removed.':'Please pay by '+fmtDeadline(i.pay_deadline)+' or your order will be removed.'}</div>`:''}${eta?`<div class="hint" style="margin-top:8px;font-weight:700;color:#2e6b12;">&#128666; ${esc(eta)}</div>`:''}</div>`; }).join('')}`
+      ${stepsHTML(i)}${(!i.paid&&i.pay_deadline)?`<div class="hint" style="margin-top:8px;font-weight:700;color:#a80000;">&#9888; ${new Date(i.pay_deadline)<new Date()?"We haven't received your payment yet — please send your e-Transfer or contact us.":'Please send your e-Transfer to confirm your order.'}</div>`:''}${eta?`<div class="hint" style="margin-top:8px;font-weight:700;color:#2e6b12;">&#128666; ${esc(eta)}</div>`:''}</div>`; }).join('')}`
     : `<div class="panel"><div class="empty">No orders found for those details. Check the spelling and use exactly what you entered when ordering.</div></div>`)}`;
 }
 
@@ -533,7 +533,7 @@ async function downloadReceipt(){
     doc.setFillColor(168,0,0); doc.roundedRect(M+16,y+100,W-2*M-32,30,6,6,'F');
     doc.setTextColor(255,255,255); doc.setFontSize(16); doc.text(o.name.toUpperCase(), W/2, y+120, { align:'center' });
     doc.setTextColor(168,0,0); doc.setFont('helvetica','bold'); doc.setFontSize(11);
-    doc.text(doc.splitTextToSize('PAY WITHIN '+PAY_DAYS+' BUSINESS DAYS (BY '+fmtDeadline(o.deadline).toUpperCase()+') OR YOUR ORDER WILL BE REMOVED.', W-2*M-32), M+16, y+150);
+    doc.text(doc.splitTextToSize('Please send your e-Transfer within 24 hours to confirm your order.', W-2*M-32), M+16, y+150);
     y+=202;
     if(o.eta){ doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(40,100,20); const el=doc.splitTextToSize(o.eta, W-2*M); doc.text(el, M, y); y+=el.length*13+8; }
     doc.setTextColor(60,60,60); doc.setFont('helvetica','normal'); doc.setFontSize(10);
