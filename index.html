@@ -339,7 +339,9 @@ function renderCart(){
     <div class="name-alert"><div class="big">&#9888; You MUST put your FULL NAME in the e-Transfer message</div><div class="who">${esc(o.name)}</div>
       <div style="margin-top:10px;font-weight:700;">We match payments to orders by name — without it we can't find your payment.</div></div>
     <div class="contact-note">&#128236; We'll contact you by <strong>email and text</strong> as soon as your order comes in.</div>
-    <button class="btn small" onclick="lastOrder=null;goTab('shop')">Order something else</button></div>`;
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn small" onclick="downloadReceipt()">&#11015; Download order sheet (PDF)</button>
+      <button class="btn ghost small" onclick="lastOrder=null;goTab('shop')">Order something else</button></div></div>`;
   }
   if(!cart.length) return `<h2 class="section-title">Cart</h2><div class="panel"><div class="empty">Your cart is empty.</div><button class="btn small" onclick="goTab('shop')">Start shopping</button></div>`;
   const units=cart.reduce((a,c)=>a+c.quantity,0), c=contactDraft;
@@ -374,7 +376,85 @@ async function placeOrder(){
   const rows = cart.map(x=>({ order_id:orderId, category:x.category, description:x.description, details:{...x.details, note:x.note||undefined}, quantity:x.quantity }));
   const { error:e2 } = await sb.from('shop_order_items').insert(rows);
   if(e2){ showToast('Order failed: '+e2.message); btn.disabled=false; return; }
-  lastOrder = { name:c.name.trim(), count:cart.length, total:cartTotal() }; cart=[]; saveCart(); render();
+  lastOrder = { id:orderId, name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim(), note:note||'', date:new Date(), count:cart.length, total:cartTotal(), items:cart.map(x=>({...x, price:PRICES[x.category]*x.quantity})) }; cart=[]; saveCart(); render();
+}
+
+/* ---------- ORDER SHEET (PDF) ---------- */
+function loadScript(src){ return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=src; sc.onload=res; sc.onerror=()=>rej(new Error('Could not load PDF library')); document.head.appendChild(sc); }); }
+async function imgDataUrl(src){
+  const blob = await (await fetch(src)).blob();
+  return await new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.readAsDataURL(blob); });
+}
+async function downloadReceipt(){
+  const o=lastOrder; if(!o) return;
+  try{
+    if(!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'letter' });
+    const W=612, M=40; let y;
+    let logo=null; try{ logo = await imgDataUrl('icon.png'); }catch(e){}
+    const orderNo = 'OBL-' + o.id.slice(0,8).toUpperCase();
+    // header band
+    doc.setFillColor(0,0,0); doc.rect(0,0,W,110,'F');
+    if(logo) doc.addImage(logo,'PNG',M,18,74,74);
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(26);
+    doc.text('ORDER RECEIPT', W-M, 52, { align:'right' });
+    doc.setFontSize(11); doc.setFont('helvetica','normal');
+    doc.text('Ottawa Beer League  |  Gear Orders', W-M, 72, { align:'right' });
+    doc.setFontSize(10); doc.setTextColor(190,190,190);
+    doc.text(orderNo, W-M, 90, { align:'right' });
+    // order + customer info
+    y=140; doc.setTextColor(0,0,0);
+    const label=(t,x,yy)=>{ doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(110,110,110); doc.text(t,x,yy); };
+    const val=(t,x,yy)=>{ doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(0,0,0); doc.text(String(t),x,yy); };
+    label('ORDER NUMBER',M,y); val(orderNo,M,y+14);
+    label('DATE',M+170,y); val(o.date.toLocaleDateString('en-CA',{year:'numeric',month:'long',day:'numeric'}),M+170,y+14);
+    label('STATUS',M+360,y); val('Awaiting e-Transfer',M+360,y+14);
+    y+=44;
+    label('CUSTOMER',M,y); val(o.name,M,y+14);
+    label('PHONE',M+170,y); val(o.phone,M+170,y+14);
+    label('EMAIL',M+360,y); val(o.email,M+360,y+14);
+    y+=40;
+    // items table
+    const drawHead=()=>{ doc.setFillColor(240,242,245); doc.rect(M,y,W-2*M,24,'F'); doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(60,60,60);
+      doc.text('ITEM',M+10,y+16); doc.text('QTY',W-M-130,y+16,{align:'right'}); doc.text('PRICE',W-M-10,y+16,{align:'right'}); y+=24; };
+    drawHead();
+    o.items.forEach(it=>{
+      const lines = doc.splitTextToSize(it.description, W-2*M-190);
+      const extra = it.note ? doc.splitTextToSize('Note: '+it.note, W-2*M-190) : [];
+      const h = 14 + (lines.length+extra.length)*13;
+      if(y+h > 640){ doc.addPage(); y=50; drawHead(); }
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(120,120,120); doc.text(it.category.toUpperCase(), M+10, y+14);
+      doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(0,0,0);
+      doc.text(lines, M+10, y+28);
+      if(extra.length){ doc.setFontSize(9); doc.setTextColor(100,100,100); doc.text(extra, M+10, y+28+lines.length*13); doc.setFontSize(11); doc.setTextColor(0,0,0); }
+      doc.text(String(it.quantity), W-M-130, y+28, { align:'right' });
+      doc.text(money(it.price), W-M-10, y+28, { align:'right' });
+      y += h+14;
+      doc.setDrawColor(225,228,232); doc.line(M,y,W-M,y);
+    });
+    // total
+    y+=22; doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(0,0,0);
+    doc.text('TOTAL', W-M-130, y, { align:'right' }); doc.setFontSize(16); doc.text(money(o.total), W-M-10, y, { align:'right' });
+    y+=30;
+    if(o.note){ doc.setFont('helvetica','italic'); doc.setFontSize(10); doc.setTextColor(90,90,90); doc.text(doc.splitTextToSize('Order note: '+o.note, W-2*M), M, y); y+=26; }
+    // payment box
+    if(y>560){ doc.addPage(); y=50; }
+    doc.setFillColor(255,243,205); doc.setDrawColor(0,0,0); doc.setLineWidth(2.5); doc.roundedRect(M,y,W-2*M,142,8,8,'FD');
+    doc.setTextColor(0,0,0); doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.text('HOW TO PAY', M+16, y+22);
+    doc.setFont('helvetica','normal'); doc.setFontSize(12); doc.text('Send an Interac e-Transfer of '+money(o.total)+' to:', M+16, y+42);
+    doc.setFont('helvetica','bold'); doc.setFontSize(17); doc.text(ETRANSFER_EMAIL, M+16, y+64);
+    doc.setFontSize(13); doc.text('YOU MUST PUT YOUR FULL NAME IN THE E-TRANSFER MESSAGE:', M+16, y+92);
+    doc.setFillColor(0,0,0); doc.roundedRect(M+16,y+100,W-2*M-32,30,6,6,'F');
+    doc.setTextColor(255,255,255); doc.setFontSize(16); doc.text(o.name.toUpperCase(), W/2, y+120, { align:'center' });
+    y+=168;
+    doc.setTextColor(60,60,60); doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    doc.text(doc.splitTextToSize('We match payments to orders by name. Your order starts once your e-Transfer is received, and we will contact you by email and text as soon as your order comes in.', W-2*M), M, y);
+    // footer
+    doc.setDrawColor(200,200,200); doc.setLineWidth(0.5); doc.line(M,740,W-M,740);
+    doc.setFontSize(9); doc.setTextColor(130,130,130); doc.text('Ottawa Beer League  |  oblhockey.com', W/2, 756, { align:'center' });
+    doc.save('OBL-order-'+o.id.slice(0,8)+'.pdf');
+  }catch(e){ showToast('Could not create PDF: '+e.message); }
 }
 
 /* ---------- ADMIN: ALL ORDERS ---------- */
@@ -526,28 +606,58 @@ function renderInventory(){
 
 /* ---------- ADMIN: CUSTOMERS / UPDATES ---------- */
 function digits(p){ return (p||'').replace(/[^\d+]/g,''); }
+let custFrom='', custTo='', custStatus='all';
+function setCustFilter(){ custFrom=document.getElementById('cFrom').value; custTo=document.getElementById('cTo').value; custStatus=document.getElementById('cStatus').value; render(); }
+function clearCustFilter(){ custFrom=''; custTo=''; custStatus='all'; render(); }
+function itemInRange(i){
+  const t=new Date(i.created_at).getTime();
+  if(custFrom && t < new Date(custFrom+'T00:00:00').getTime()) return false;
+  if(custTo && t > new Date(custTo+'T23:59:59').getTime()) return false;
+  if(custStatus==='unpaid' && i.paid) return false;
+  if(custStatus==='notdelivered' && i.delivered) return false;
+  if(custStatus==='ordered' && (!i.ordered || i.delivered)) return false;
+  return true;
+}
 function customerList(){
   const m={};
-  adminItems.forEach(i=>{ const w=who(i); const k=(w.email||'').toLowerCase()+'|'+w.phone.replace(/\D/g,''); (m[k]=m[k]||{ name:w.name, contact_phone:w.phone, contact_email:w.email, items:[] }).items.push(i); });
+  adminItems.filter(itemInRange).forEach(i=>{ const w=who(i); const k=(w.email||'').toLowerCase()+'|'+w.phone.replace(/\D/g,''); (m[k]=m[k]||{ name:w.name, contact_phone:w.phone, contact_email:w.email, items:[] }).items.push(i); });
   return Object.values(m).sort((a,b)=>a.name.localeCompare(b.name));
+}
+function emailGroup(){
+  const rows=customerList(), emails=[...new Set(rows.map(c=>c.contact_email).filter(Boolean))];
+  if(!emails.length){ showToast('No customers match'); return; }
+  const subject=encodeURIComponent('OBL order update');
+  const url='mailto:?bcc='+encodeURIComponent(emails.join(','))+'&subject='+subject;
+  if(url.length>1900){ navigator.clipboard.writeText(emails.join(', ')).then(()=>showToast(`${emails.length} emails copied — paste into the BCC field of a new email`),()=>showToast('Too many to open directly — use Copy emails')); return; }
+  window.location.href=url;
 }
 function renderCustomers(){
   const rows=customerList();
-  const emails=rows.map(c=>c.contact_email).filter(Boolean);
+  const filtered = custFrom||custTo||custStatus!=='all';
   return `<h2 class="section-title">Customers</h2>
-  <p class="section-sub">${rows.length} customer${rows.length===1?'':'s'}. Tap a phone number to call, or use Text / Email to send an update.</p>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
-    <a class="btn small" style="text-decoration:none;" href="mailto:?bcc=${encodeURIComponent(emails.join(','))}&subject=${encodeURIComponent('OBL order update')}">Email everyone</a>
-    <button class="btn ghost small" onclick="copyList('phone')">Copy all phone numbers</button>
-    <button class="btn ghost small" onclick="copyList('email')">Copy all emails</button></div>
-  <div class="panel"><div class="table-scroll"><table style="min-width:0"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Order status</th><th>Send update</th></tr></thead><tbody>
+  <p class="section-sub">${rows.length} customer${rows.length===1?'':'s'}${filtered?' matching the filter below':''}. Tap a phone number to call, or use Text / Email to send an update.</p>
+  <div class="panel" style="padding:16px;">
+    <div class="grid cols-3">
+      <div class="field"><label>Orders placed from</label><input id="cFrom" type="date" value="${esc(custFrom)}" onchange="setCustFilter()"></div>
+      <div class="field"><label>Up to (optional)</label><input id="cTo" type="date" value="${esc(custTo)}" onchange="setCustFilter()"></div>
+      <div class="field"><label>Items that are</label><select id="cStatus" onchange="setCustFilter()">
+        ${[['all','Any status'],['unpaid','Unpaid'],['ordered','Ordered, not yet delivered'],['notdelivered','Not delivered']].map(([v,l])=>`<option value="${v}" ${custStatus===v?'selected':''}>${l}</option>`).join('')}
+      </select></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn small" onclick="emailGroup()">Email these ${rows.length} customer${rows.length===1?'':'s'}</button>
+      <button class="btn ghost small" onclick="copyList('email')">Copy emails</button>
+      <button class="btn ghost small" onclick="copyList('phone')">Copy phone numbers</button>
+      ${filtered?`<button class="btn ghost small" onclick="clearCustFilter()">Clear filter</button>`:''}
+    </div></div>
+  <div class="panel"><div class="table-scroll"><table style="min-width:0"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Orders</th><th>Send update</th></tr></thead><tbody>
   ${rows.map(c=>{ const open=c.items.filter(i=>!i.delivered).length;
     const msg=`Hi ${(c.name||'').split(' ')[0]}, this is OBL with an update on your order: `;
     return `<tr><td><strong>${esc(c.name)}</strong></td>
       <td>${c.contact_phone?`<a href="tel:${digits(c.contact_phone)}">${esc(c.contact_phone)}</a>`:'—'}</td>
       <td>${c.contact_email?`<a href="mailto:${esc(c.contact_email)}">${esc(c.contact_email)}</a>`:'—'}</td>
-      <td>${c.items.length} item${c.items.length===1?'':'s'} · ${open} not delivered</td>
-      <td>${c.contact_phone?`<a class="btn ghost small" style="text-decoration:none;" href="sms:${digits(c.contact_phone)}?&body=${encodeURIComponent(msg)}">Text</a> `:''}${c.contact_email?`<a class="btn ghost small" style="text-decoration:none;" href="mailto:${esc(c.contact_email)}?subject=${encodeURIComponent('OBL order update')}&body=${encodeURIComponent(msg)}">Email</a>`:''}</td></tr>`; }).join('')||'<tr><td colspan="5" class="hint">No customers yet.</td></tr>'}
+      <td>${c.items.length} item${c.items.length===1?'':'s'} · ${open} not delivered<div class="hint" style="margin:2px 0 0;">${[...new Set(c.items.map(i=>new Date(i.created_at).toLocaleDateString('en-CA',{month:'short',day:'numeric'})))].join(', ')}</div></td>
+      <td>${c.contact_phone?`<a class="btn ghost small" style="text-decoration:none;" href="sms:${digits(c.contact_phone)}?&body=${encodeURIComponent(msg)}">Text</a> `:''}${c.contact_email?`<a class="btn ghost small" style="text-decoration:none;" href="mailto:${esc(c.contact_email)}?subject=${encodeURIComponent('OBL order update')}&body=${encodeURIComponent(msg)}">Email</a>`:''}</td></tr>`; }).join('')||'<tr><td colspan="5" class="hint">No customers match.</td></tr>'}
   </tbody></table></div></div>`;
 }
 function copyList(kind){
