@@ -55,6 +55,8 @@
   .cat-tabs{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
   .cat-tabs button{padding:12px 22px;border-radius:12px;border:2px solid var(--line);background:#fff;font-weight:700;font-size:14px;}
   .cat-tabs button.on{background:#000;border-color:#000;color:#fff;}
+  .cat-tabs button.soon{cursor:not-allowed;color:#8a8f96;background:#f4f6f8;display:inline-flex;align-items:center;gap:10px;}
+  .soon-tag{background:#ffd43b;color:#5c4400;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;}
   .chip{display:inline-block;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);font-weight:600;font-size:13px;color:var(--muted);margin:0 6px 6px 0;cursor:pointer;}
   .chip.on{background:#000;border-color:#000;color:#fff;}
   .tag{font-size:11px;padding:3px 9px;border-radius:12px;background:var(--line);color:var(--muted);font-weight:700;white-space:nowrap;display:inline-block;}
@@ -297,7 +299,8 @@ function renderShop(){
   const cats=['Sticks','Jerseys','Gloves'];
   return `<h2 class="section-title">Place an Order</h2>
   <p class="section-sub">Sticks ${money(PRICES.Sticks)} · Jerseys ${money(PRICES.Jerseys)} · Gloves ${money(PRICES.Gloves)}. Build your item, add it to the cart, then check out and pay by Interac e-Transfer.</p>
-  <div class="cat-tabs">${cats.map(c=>`<button class="${shopCat===c?'on':''}" onclick="setCat('${c}')">${c}</button>`).join('')}</div>
+  <div class="cat-tabs">${cats.map(c=>`<button class="${shopCat===c?'on':''}" onclick="setCat('${c}')">${c}</button>`).join('')}
+    <button class="soon" disabled aria-disabled="true" title="Coming soon">Skates <span class="soon-tag">Coming soon</span></button></div>
   <div class="panel">${shopCat==='Sticks'?stickBuilder():shopCat==='Jerseys'?jerseyBuilder():gloveBuilder()}</div>`;
 }
 function dsel(key,label,optionsArr,ph,disabled){
@@ -311,7 +314,8 @@ function stickBuilder(){
   const flexes = m && d.hand && d.curve ? m[d.hand][d.curve] : [];
   return `<h3 style="margin-top:0;">Hockey Stick — ${money(PRICES.Sticks)} each</h3><div class="grid cols-3">
     ${dsel('brand','Brand',STICK_BRANDS,'Select brand')}
-    ${dsel('model','Stick',Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand),'Select stick',!d.brand)}
+    <div class="field"><label>Stick</label><select data-d="model" onchange="dchange('model')" ${d.brand?'':'disabled'}>${opts(Object.keys(STICK_CATALOG).filter(k=>STICK_BRAND_OF[k]===d.brand),d.model,'Select stick')}${d.brand==='CCM'?'<option disabled>FT10 — Coming soon</option>':''}</select>
+      ${d.brand==='CCM'?'<div style="margin-top:6px;"><span class="soon-tag">FT10 &middot; Coming soon</span></div>':''}</div>
     ${dsel('hand','Hand',m?['LH','RH']:[],'Select hand',!m)}
     ${dsel('curve','Curve',curves,'Select curve',!curves.length)}
     ${dsel('flex','Flex',flexes,'Select flex',!flexes.length)}
