@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OBL Orders — Ottawa Beer League</title>
+<script>if(location.protocol==='http:' && location.hostname!=='localhost' && location.hostname!=='127.0.0.1'){ location.replace('https:'+location.href.substring(5)); }</script>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="manifest" href="manifest.json">
@@ -167,6 +168,24 @@ const GLOVE_CATALOG = {
 };
 const SIZE_CHART_URL = 'jersey-size-chart.png';
 
+/* ================= DIAGNOSTICS (silent event log so lost orders can be found) ================= */
+let SID='';
+try{ SID = sessionStorage.getItem('obl_sid') || (Math.random().toString(36).slice(2)+Date.now().toString(36)); sessionStorage.setItem('obl_sid',SID); }catch(e){ SID = Math.random().toString(36).slice(2); }
+let _errCount=0;
+function logEvent(stage, x){
+  try{
+    if(typeof me!=='undefined' && me) return;            // don't log admin activity
+    x = x || {};
+    sb.from('order_attempts').insert({
+      session_id:SID, stage, attempt_id:x.attempt_id||null, error:(x.error||'').toString().slice(0,500)||null,
+      user_agent:(navigator.userAgent||'').slice(0,300), name:x.name||null, phone:x.phone||null, email:x.email||null,
+      cart:x.cart||null, page:(location.pathname||'/').slice(0,100)
+    }).then(()=>{}, ()=>{});
+  }catch(e){}
+}
+window.addEventListener('error', e=>{ if(_errCount++<5) logEvent('js_error',{ error:(e.message||'')+' @'+(e.filename||'').split('/').pop()+':'+e.lineno }); });
+window.addEventListener('unhandledrejection', e=>{ if(_errCount++<5) logEvent('js_error',{ error:'promise: '+((e.reason&&e.reason.message)||e.reason||'') }); });
+
 /* ================= DELIVERY ESTIMATES ================= */
 // Supplier lead times in business days (weekends skipped, holidays not). Sticks & gloves share one order date; jerseys have their own.
 const LEAD = { sg:{min:10,max:12,label:'Sticks & gloves'}, j:{min:15,max:20,label:'Jerseys'} };
@@ -273,15 +292,16 @@ function who(i){ const o=ordersById[i.order_id]||{}; return { name:o.customer_na
 /* ================= RENDER ================= */
 function tabsList(){
   const t=[['shop','Shop'],['cart','Cart'],['lookup','Find My Order']];
-  if(isAdmin()) t.push(['aorders','All Orders'],['toorder','To Order'],['inventory','Inventory'],['customers','Customers'],['admins','Admins']);
+  if(isAdmin()) t.push(['aorders','All Orders'],['toorder','To Order'],['inventory','Inventory'],['customers','Customers'],['diag','Diagnostics'],['admins','Admins']);
   return t;
 }
 function renderTabs(){
   document.getElementById('tabs').innerHTML = tabsList().map(([id,l])=>`<button class="${tab===id?'active':''}" onclick="goTab('${id}')">${l}${id==='cart'&&cart.length?`<span class="badge">${cart.length}</span>`:''}</button>`).join('');
 }
 function goTab(id){
-  tab=id;
-  if(id==='admins') loadAdmins().then(render);
+  tab=id; if(id==='cart' && cart.length) logEvent('view_cart');
+  if(id==='diag') loadDiag().then(render);
+  else if(id==='admins') loadAdmins().then(render);
   else if(['aorders','toorder','inventory','customers'].includes(id)) refreshAdmin().then(render);
   else render();
   window.scrollTo(0,0);
@@ -289,7 +309,7 @@ function goTab(id){
 function render(){
   renderTabs();
   const m=document.getElementById('main');
-  m.innerHTML = ({shop:renderShop,cart:renderCart,aorders:renderAdminOrders,toorder:renderToOrder,inventory:renderInventory,customers:renderCustomers,admins:renderAdmins,lookup:renderLookup}[tab]||renderShop)();
+  m.innerHTML = ({shop:renderShop,cart:renderCart,aorders:renderAdminOrders,toorder:renderToOrder,inventory:renderInventory,customers:renderCustomers,diag:renderDiag,admins:renderAdmins,lookup:renderLookup}[tab]||renderShop)();
 }
 /* ---------- SHOP ---------- */
 function opts(arr,cur,ph){ return `<option value="">${ph}</option>`+arr.map(v=>`<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(v)}</option>`).join(''); }
@@ -376,7 +396,7 @@ function addToCart(){
     item={ category:'Gloves', description:`Bauer ${d.model} gloves — ${d.color} ${d.size}`, details:{brand:'Bauer',model:d.model,color:d.color,size:d.size} };
   }
   item.quantity=qty; item.note=(d.notes||'').trim();
-  cart.push(item); saveCart(); draft={}; showToast('Added to cart ✓'); render();
+  cart.push(item); saveCart(); draft={}; showToast('Added to cart ✓'); logEvent('add_to_cart',{ error:item.description }); render();
 }
 function cartTotal(){ return cart.reduce((a,c)=>a+PRICES[c.category]*c.quantity,0); }
 function removeFromCart(i){ cart.splice(i,1); saveCart(); render(); }
@@ -433,7 +453,7 @@ let orderError='';
 async function placeOrder(){
   csync(); const c=contactDraft;
   if(!cart.length) return;
-  const fail=(m)=>{ orderError=m; showToast(m); render(); };
+  const fail=(m)=>{ orderError=m; showToast(m); logEvent('validation_error',{ error:m, name:c.name, phone:c.phone, email:c.email }); render(); };
   if(!c.name.trim()) return fail('Enter your name');
   if(c.phone.replace(/\D/g,'').length<10) return fail('Enter a valid phone number');
   if(!/^\S+@\S+\.\S+$/.test(c.email.trim())) return fail('Enter a valid email');
@@ -442,14 +462,17 @@ async function placeOrder(){
   try{
     const note=(document.getElementById('orderNote')||{}).value||null;
     const orderId = genUUID();
+    logEvent('place_click',{ attempt_id:orderId, name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim(), cart:cart.map(x=>({category:x.category,description:x.description,details:x.details,quantity:x.quantity,note:x.note||''})) });
     const { error } = await sb.from('shop_orders').insert({ id:orderId, customer_name:c.name.trim(), customer_phone:c.phone.trim(), customer_email:c.email.trim(), customer_note:note });
     if(error) throw new Error(error.message);
     const rows = cart.map(x=>({ order_id:orderId, category:x.category, description:x.description, details:{...x.details, note:x.note||undefined}, quantity:x.quantity }));
     const { error:e2 } = await sb.from('shop_order_items').insert(rows);
     if(e2){ await sb.from('shop_orders').delete().eq('id',orderId); throw new Error(e2.message); }
     lastOrder = { deadline:newDeadline(new Date()), eta:cartEtaText(cart), id:orderId, name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim(), note:note||'', date:new Date(), count:cart.length, total:cartTotal(), items:cart.map(x=>({...x, price:PRICES[x.category]*x.quantity})) };
+    logEvent('success',{ attempt_id:orderId, name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim() });
     cart=[]; saveCart(); orderError=''; render();
   }catch(e){
+    logEvent('failed',{ error:(e&&e.message)||'unknown', name:c.name.trim(), phone:c.phone.trim(), email:c.email.trim() });
     orderError = 'Your order was NOT placed: '+(e && e.message ? e.message : 'unknown error')+'. Please try again, or contact us.';
     render(); window.scrollTo(0,document.body.scrollHeight);
   }
@@ -834,6 +857,79 @@ function copyList(kind){
   navigator.clipboard.writeText(v).then(()=>showToast('Copied ✓'),()=>showToast('Copy failed'));
 }
 
+/* ---------- ADMIN: DIAGNOSTICS ---------- */
+let diagEvents=[];
+async function loadDiag(){
+  await refreshAdmin();
+  const since=new Date(Date.now()-7*86400000).toISOString();
+  const { data } = await sb.from('order_attempts').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(1500);
+  diagEvents=data||[];
+}
+function lostAttempts(){
+  const done=new Set(diagEvents.filter(e=>e.stage==='success').map(e=>e.attempt_id));
+  const seen=new Set(), out=[];
+  diagEvents.filter(e=>e.stage==='place_click' && e.attempt_id).forEach(e=>{
+    if(seen.has(e.attempt_id)) return; seen.add(e.attempt_id);
+    if(done.has(e.attempt_id) || ordersById[e.attempt_id]) return;     // order actually exists
+    if((Date.now()-new Date(e.created_at).getTime())<60000) return;    // give in-flight orders a minute
+    out.push(e);
+  });
+  return out;
+}
+async function recoverAttempt(attemptId){
+  const e=diagEvents.find(x=>x.stage==='place_click' && x.attempt_id===attemptId); if(!e||!e.cart) return;
+  if(!confirm(`Create the order for ${e.name} from this failed attempt?`)) return;
+  const { error } = await sb.from('shop_orders').insert({ id:attemptId, customer_name:e.name, customer_phone:e.phone, customer_email:e.email });
+  if(error){ showToast('Failed: '+error.message); return; }
+  const rows=e.cart.map(c=>({ order_id:attemptId, category:c.category, description:c.description, details:{...(c.details||{}), note:c.note||undefined}, quantity:c.quantity }));
+  const { error:e2 } = await sb.from('shop_order_items').insert(rows);
+  if(e2){ showToast('Order created but items failed: '+e2.message); return; }
+  showToast('Order recovered ✓'); await loadDiag(); render();
+}
+async function clearDiag(){
+  if(!confirm('Delete all diagnostic log entries?')) return;
+  const { error } = await sb.from('order_attempts').delete().gte('created_at','2000-01-01');
+  if(error){ showToast('Failed: '+error.message); return; }
+  diagEvents=[]; render();
+}
+function deviceOf(ua){
+  ua=ua||''; const os=/iPhone|iPad/.test(ua)?'iPhone/iPad':/Android/.test(ua)?'Android':/Mac OS X/.test(ua)?'Mac':/Windows/.test(ua)?'Windows':'Other';
+  const br=/EdgA?\//.test(ua)?'Edge':/CriOS|Chrome\//.test(ua)?'Chrome':/FxiOS|Firefox\//.test(ua)?'Firefox':/Safari\//.test(ua)?'Safari':/; wv\)|Version\/.*Chrome/.test(ua)?'App browser':'Other';
+  const ver=(ua.match(/(?:Chrome|CriOS|Version|OS )[\/ ]?([\d_.]+)/)||[])[1]||'';
+  return `${os} · ${br}${ver?' '+ver.replace(/_/g,'.').split('.').slice(0,2).join('.'):''}`;
+}
+function renderDiag(){
+  const ev=diagEvents, now=Date.now();
+  const within=(ms)=>ev.filter(e=>now-new Date(e.created_at).getTime()<ms);
+  const funnel=(list)=>{ const c=st=>list.filter(e=>e.stage===st).length;
+    return { visits:new Set(list.filter(e=>e.stage==='visit').map(e=>e.session_id)).size, add:c('add_to_cart'), cart:c('view_cart'), click:c('place_click'), ok:c('success'), fail:c('failed'), val:c('validation_error'), js:c('js_error') }; };
+  const f24=funnel(within(86400000)), f7=funnel(ev);
+  const lost=lostAttempts();
+  const problems=ev.filter(e=>['failed','js_error','validation_error'].includes(e.stage)).slice(0,40);
+  const row=(k,a,b)=>`<tr><td>${k}</td><td style="text-align:right;">${a}</td><td style="text-align:right;">${b}</td></tr>`;
+  return `<h2 class="section-title">Diagnostics</h2>
+  <p class="section-sub">Anonymous activity from the customer order page. Logging began when this version went live.</p>
+  ${lost.length?`<div class="panel" style="border:3px solid #c0392b;background:#fff1f1;"><h3 style="margin-top:0;color:#a80000;">&#9888; Possible lost orders (${lost.length})</h3>
+    <p class="hint" style="margin-top:0;">Someone pressed Place Order but no order was saved. Their details and cart are below — you can create the order yourself.</p>
+    ${lost.map(e=>`<div style="border-top:1px solid #e0b4b4;padding:10px 0;">
+      <strong>${esc(e.name||'?')}</strong> · ${esc(e.phone||'')} · ${esc(e.email||'')} <span class="hint">· ${new Date(e.created_at).toLocaleString('en-CA')} · ${esc(deviceOf(e.user_agent))}</span>
+      <div style="margin:4px 0;">${(e.cart||[]).map(c=>`<div>&bull; ${esc(c.description)} × ${c.quantity}${c.note?` <span class="hint">(${esc(c.note)})</span>`:''}</div>`).join('')}</div>
+      ${diagEvents.filter(x=>x.stage==='failed'&&x.session_id===e.session_id).slice(0,1).map(x=>`<div class="hint" style="color:#a80000;">Error: ${esc(x.error)}</div>`).join('')}
+      <button class="btn small" onclick="recoverAttempt('${e.attempt_id}')">Create this order</button></div>`).join('')}</div>`
+    :`<div class="panel" style="border:2px solid #1f9d55;background:#f0fbf4;"><strong>&#10003; No lost orders.</strong> <span class="hint">Every Place Order click in the last 7 days has a saved order.</span></div>`}
+  <div class="panel"><h3 style="margin-top:0;">Funnel</h3>
+    <table style="min-width:0"><thead><tr><th></th><th style="text-align:right;">Last 24 hours</th><th style="text-align:right;">Last 7 days</th></tr></thead><tbody>
+      ${row('Visitors (unique sessions)',f24.visits,f7.visits)}${row('Items added to cart',f24.add,f7.add)}${row('Opened the cart',f24.cart,f7.cart)}
+      ${row('Pressed Place Order',f24.click,f7.click)}${row('<strong>Order saved</strong>',f24.ok,f7.ok)}
+      ${row('<span style="color:#a80000">Order failed</span>',f24.fail,f7.fail)}${row('Form errors (missing/invalid info)',f24.val,f7.val)}${row('Page errors',f24.js,f7.js)}
+    </tbody></table>
+    <div class="hint">Many visitors but few "Added to cart" means people aren't getting as far as ordering. Added to cart but no "Opened the cart" suggests they don't find the Cart tab. "Pressed Place Order" without "Order saved" is a failure.</div></div>
+  <div class="panel"><h3 style="margin-top:0;">Problems (${problems.length})</h3>
+    ${problems.length?`<div class="table-scroll"><table style="min-width:600px"><thead><tr><th>When</th><th>Type</th><th>Detail</th><th>Device</th><th>Who</th></tr></thead><tbody>
+    ${problems.map(e=>`<tr><td style="white-space:nowrap;">${new Date(e.created_at).toLocaleString('en-CA',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</td><td><span class="tag ${e.stage==='failed'?'warn':'dark'}">${e.stage}</span></td><td>${esc(e.error||'')}</td><td>${esc(deviceOf(e.user_agent))}</td><td>${esc(e.name||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="hint">None.</div>'}</div>
+  <button class="btn ghost small" onclick="clearDiag()">Clear log</button>`;
+}
+
 /* ---------- ADMIN: MANAGE ADMIN LOGINS ---------- */
 let adminList=[], allProfiles=[];
 async function loadAdmins(){
@@ -900,6 +996,7 @@ function renderAdmins(){
 (async function init(){
   loadCart(); render();
   loadSettings().then(render);
+  try{ if(!sessionStorage.getItem('obl_visit_logged')){ sessionStorage.setItem('obl_visit_logged','1'); logEvent('visit'); } }catch(e){ logEvent('visit'); }
   const { data } = await sb.auth.getSession();
   if(data.session){ await enterApp(data.session, true); }
 })();
